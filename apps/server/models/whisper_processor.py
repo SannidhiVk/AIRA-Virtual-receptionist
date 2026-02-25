@@ -1,14 +1,13 @@
 import asyncio
 import logging
 import numpy as np
-import torch
-from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
+from faster_whisper import WhisperModel
 
 logger = logging.getLogger(__name__)
 
 
 class WhisperProcessor:
-    """Handles speech-to-text using Whisper model"""
+    """Handles speech-to-text using faster-whisper model"""
 
     _instance = None
 
@@ -19,52 +18,35 @@ class WhisperProcessor:
         return cls._instance
 
     def __init__(self):
-        self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
-        self.torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-
-        logger.info(f"Using device for Whisper: {self.device}")
-
-        # Load Whisper model
-        model_id = "openai/whisper-small"
-        logger.info(f"Loading {model_id}...")
-
-        self.model = AutoModelForSpeechSeq2Seq.from_pretrained(
-            model_id,
-            torch_dtype=self.torch_dtype,
-            low_cpu_mem_usage=True,
-            use_safetensors=True,
+        logger.info("Initializing faster-whisper model (distil-large-v3, CPU int8)...")
+        self.model = WhisperModel(
+            "distil-large-v3",
+            device="cpu",
+            compute_type="int8",
+            cpu_threads=4,
         )
-        self.model.to(self.device)
-
-        self.processor = AutoProcessor.from_pretrained(model_id)
-
-        # Create pipeline
-        self.pipe = pipeline(
-            "automatic-speech-recognition",
-            model=self.model,
-            tokenizer=self.processor.tokenizer,
-            feature_extractor=self.processor.feature_extractor,
-            torch_dtype=self.torch_dtype,
-            device=self.device,
-        )
-
-        logger.info("Whisper model ready for transcription")
+        logger.info("faster-whisper model ready for transcription")
         self.transcription_count = 0
 
     async def transcribe_audio(self, audio_bytes):
-        """Transcribe audio bytes to text"""
+        """Transcribe audio bytes to text using faster-whisper with VAD."""
         try:
-            # Convert audio bytes to numpy array
+            # Convert 16-bit PCM audio bytes to float32 numpy array in [-1.0, 1.0]
             audio_array = (
                 np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
             )
 
-            # Run transcription in executor to avoid blocking
-            result = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: self.pipe(audio_array)
-            )
+            loop = asyncio.get_event_loop()
 
-            transcribed_text = result["text"].strip()
+            def _run_transcription():
+                segments, _info = self.model.transcribe(
+                    audio_array,
+                    vad_filter=True,
+                )
+                # segments is a generator; materialize to list to safely iterate twice
+                return " ".join(segment.text for segment in segments).strip()
+
+            transcribed_text = await loop.run_in_executor(None, _run_transcription)
             self.transcription_count += 1
 
             logger.info(

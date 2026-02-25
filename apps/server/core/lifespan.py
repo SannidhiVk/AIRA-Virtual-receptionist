@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from models.whisper_processor import WhisperProcessor
-from models.smolvlm_processor import SmolVLMProcessor
+from models.ollama_processor import OllamaProcessor
 from models.tts_processor import KokoroTTSProcessor
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ async def lifespan(app: FastAPI):
     try:
         # Initialize processors to load models
         whisper_processor = WhisperProcessor.get_instance()
-        smolvlm_processor = SmolVLMProcessor.get_instance()
+        ollama_processor = OllamaProcessor.get_instance()
         tts_processor = KokoroTTSProcessor.get_instance()
         logger.info("All models initialized successfully")
     except Exception as e:

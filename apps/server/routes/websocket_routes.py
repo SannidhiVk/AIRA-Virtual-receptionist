@@ -7,9 +7,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from managers.connection_manager import manager
 from models.whisper_processor import WhisperProcessor
-from models.smolvlm_processor import SmolVLMProcessor
+from models.ollama_processor import OllamaProcessor
 from models.tts_processor import KokoroTTSProcessor
-from services.audio_service import process_audio_segment
 
 logger = logging.getLogger(__name__)
 
@@ -18,13 +17,16 @@ router = APIRouter()
 
 @router.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
-    """WebSocket endpoint for real-time multimodal interaction"""
+    """WebSocket endpoint for real-time Receptionist AI interaction (audio-only)."""
     await manager.connect(websocket, client_id)
 
     # Get instances of processors
     whisper_processor = WhisperProcessor.get_instance()
-    smolvlm_processor = SmolVLMProcessor.get_instance()
+    ollama_processor = OllamaProcessor.get_instance()
     tts_processor = KokoroTTSProcessor.get_instance()
+
+    # Per-connection text queue
+    text_queue: asyncio.Queue[str] = asyncio.Queue()
 
     try:
         # Send initial configuration confirmation
@@ -33,7 +35,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         )
 
         async def send_keepalive():
-            """Send periodic keepalive pings"""
+            """Send periodic keepalive pings."""
             while True:
                 try:
                     await websocket.send_text(
@@ -43,8 +45,8 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 except Exception:
                     break
 
-        async def receive_and_process():
-            """Receive and process messages from the client"""
+        async def listener():
+            """Receive audio from client, run STT, and enqueue transcribed text."""
             try:
                 while True:
                     data = await websocket.receive_text()
@@ -53,124 +55,29 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
                         # Handle complete audio segments from frontend
                         if "audio_segment" in message:
-                            # Cancel any current processing
-                            if manager.client_state.get(client_id) != "IDLE":
-                                logger.info(
-                                    f"Ignoring audio because state is {manager.client_state.get(client_id)}"
-                                )
-                                continue
-                            await manager.cancel_current_tasks(client_id)
-
-                            # Decode audio data
                             audio_data = base64.b64decode(message["audio_segment"])
-
-                            # Check if image is also included
-                            image_data = None
-                            if "image" in message:
-                                image_data = base64.b64decode(message["image"])
-                                logger.info(
-                                    f"Received audio+image: audio={len(audio_data)} bytes, image={len(image_data)} bytes"
-                                )
-                            else:
-                                logger.info(
-                                    f"Received audio-only: {len(audio_data)} bytes"
-                                )
-
-                            # Start processing the audio segment with optional image
-                            processing_task = asyncio.create_task(
-                                process_audio_segment(
-                                    websocket,
-                                    client_id,
-                                    audio_data,
-                                    image_data,
-                                    manager,
-                                    whisper_processor,
-                                    smolvlm_processor,
-                                    tts_processor,
-                                )
+                            logger.info(
+                                f"Received audio-only segment: {len(audio_data)} bytes"
                             )
-                            manager.set_task(client_id, "processing", processing_task)
 
-                        # Handle standalone images (only if not currently processing)
-                        elif "image" in message:
-                            if not (
-                                client_id in manager.current_tasks
-                                and manager.current_tasks[client_id]["processing"]
-                                and not manager.current_tasks[client_id][
-                                    "processing"
-                                ].done()
-                            ):
-                                image_data = base64.b64decode(message["image"])
-                                manager.update_stats("images_received")
+                            # Transcribe using faster-whisper (CPU)
+                            transcribed_text = await whisper_processor.transcribe_audio(
+                                audio_data
+                            )
+                            logger.info(
+                                f"Listener transcription result: '{transcribed_text}'"
+                            )
 
-                                # Save standalone image
-                                saved_path = manager.image_manager.save_image(
-                                    image_data, client_id, "standalone"
-                                )
-                                if saved_path:
-                                    verification = manager.image_manager.verify_image(
-                                        saved_path
-                                    )
-                                    logger.info(
-                                        f"📸 Standalone image saved and verified: {verification}"
-                                    )
+                            if transcribed_text in [
+                                "NOISE_DETECTED",
+                                "NO_SPEECH",
+                                None,
+                            ]:
+                                continue
 
-                                await smolvlm_processor.set_image(image_data)
-                                logger.info("Image updated")
+                            await text_queue.put(transcribed_text)
 
-                        # Handle realtime input (for backward compatibility)
-                        elif "realtime_input" in message:
-                            for chunk in message["realtime_input"]["media_chunks"]:
-                                if chunk["mime_type"] == "audio/pcm":
-                                    # Treat as complete audio segment
-                                    await manager.cancel_current_tasks(client_id)
-
-                                    audio_data = base64.b64decode(chunk["data"])
-                                    processing_task = asyncio.create_task(
-                                        process_audio_segment(
-                                            websocket,
-                                            client_id,
-                                            audio_data,
-                                            None,
-                                            manager,
-                                            whisper_processor,
-                                            smolvlm_processor,
-                                            tts_processor,
-                                        )
-                                    )
-                                    manager.set_task(
-                                        client_id, "processing", processing_task
-                                    )
-
-                                elif chunk["mime_type"] == "image/jpeg":
-                                    # Only process image if not currently processing audio
-                                    if not (
-                                        client_id in manager.current_tasks
-                                        and manager.current_tasks[client_id][
-                                            "processing"
-                                        ]
-                                        and not manager.current_tasks[client_id][
-                                            "processing"
-                                        ].done()
-                                    ):
-                                        image_data = base64.b64decode(chunk["data"])
-                                        manager.update_stats("images_received")
-
-                                        # Save image from realtime input
-                                        saved_path = manager.image_manager.save_image(
-                                            image_data, client_id, "realtime"
-                                        )
-                                        if saved_path:
-                                            verification = (
-                                                manager.image_manager.verify_image(
-                                                    saved_path
-                                                )
-                                            )
-                                            logger.info(
-                                                f"📸 Realtime image saved and verified: {verification}"
-                                            )
-
-                                        await smolvlm_processor.set_image(image_data)
+                        # Ignore non-audio payloads for the Receptionist AI
 
                     except json.JSONDecodeError as e:
                         logger.error(f"Error decoding JSON: {e}")
@@ -187,21 +94,64 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         await websocket.send_text(
                             json.dumps({"error": f"Processing error: {str(e)}"})
                         )
+            except WebSocketDisconnect:
+                logger.info("WebSocket connection closed during listener loop")
+
+        async def brain():
+            """Consume transcribed text, get LLM response, synthesize TTS, and send audio."""
+            try:
+                while True:
+                    text = await text_queue.get()
+                    manager.client_state[client_id] = "THINKING"
+
+                    # Get LLM response from Ollama
+                    reply_text = await ollama_processor.get_response(text)
+                    logger.info(f"Ollama reply: '{reply_text}'")
+
+                    # Synthesize speech with Kokoro TTS (non-blocking)
+                    audio, word_timings = await tts_processor.synthesize_initial_speech_with_timing(  # type: ignore[attr-defined]
+                        reply_text
+                    )
+
+                    if audio is not None and len(audio) > 0:
+                        import numpy as np  # Local import to avoid unused at module level
+
+                        audio_bytes = (audio * 32767).astype(np.int16).tobytes()
+                        base64_audio = base64.b64encode(audio_bytes).decode("utf-8")
+
+                        audio_message = {
+                            "audio": base64_audio,
+                            "word_timings": word_timings,
+                            "sample_rate": 24000,
+                            "method": "native_kokoro_timing",
+                            "modality": "audio_only",
+                        }
+                        manager.client_state[client_id] = "SPEAKING"
+                        await websocket.send_text(json.dumps(audio_message))
+
+                    # Mark queue task done and return to waiting for next utterance
+                    text_queue.task_done()
+                    manager.client_state[client_id] = "WAITING_FOR_PLAYBACK"
 
             except WebSocketDisconnect:
-                logger.info("WebSocket connection closed during receive loop")
+                logger.info("WebSocket connection closed during brain loop")
+            except Exception as e:
+                logger.error(f"Brain task error for client {client_id}: {e}")
 
         # Run tasks concurrently
-        receive_task = asyncio.create_task(receive_and_process())
+        listener_task = asyncio.create_task(listener())
+        brain_task = asyncio.create_task(brain())
         keepalive_task = asyncio.create_task(send_keepalive())
 
-        # Wait for any task to complete (usually due to disconnection or error)
+        # Track tasks in manager for potential cancellation
+        manager.current_tasks[client_id]["processing"] = brain_task
+        manager.current_tasks[client_id]["tts"] = None
+
         done, pending = await asyncio.wait(
-            [receive_task, keepalive_task],
+            [listener_task, brain_task, keepalive_task],
             return_when=asyncio.FIRST_COMPLETED,
         )
 
-        # Cancel pending tasks
         for task in pending:
             task.cancel()
             try:
@@ -209,10 +159,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             except asyncio.CancelledError:
                 pass
 
-        # Log results of completed tasks
         for task in done:
             try:
-                result = task.result()
+                _ = task.result()
             except Exception as e:
                 logger.error(f"Task finished with error: {e}")
 
