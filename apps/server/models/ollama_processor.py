@@ -35,7 +35,7 @@ class OllamaProcessor:
 
     def __init__(self):
         self.client = ollama.AsyncClient()
-        self.model_name = "llama-reduced"
+        self.model_name = "llama3:8b-instruct-q4_0"
         self.history: List[Dict[str, str]] = [
             {"role": "system", "content": SYSTEM_PROMPT}
         ]

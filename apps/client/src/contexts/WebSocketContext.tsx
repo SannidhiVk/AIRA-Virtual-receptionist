@@ -6,6 +6,7 @@ import React, {
   useRef,
   useCallback,
   useState,
+  useMemo,
   ReactNode
 } from 'react';
 
@@ -70,11 +71,20 @@ interface WebSocketProviderProps {
 
 export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
   children,
-  serverUrl = 'ws://127.0.0.1:8000/ws/test-client'
+  serverUrl = 'ws://127.0.0.1:8000/ws'
 }) => {
   const wsRef = useRef<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+
+  // Generate a unique client ID for this browser session
+  const clientId = useMemo(
+    () => 'user_' + Math.random().toString(36).substring(7),
+    []
+  );
+
+  // Create the full URL by combining the base serverUrl and the clientId
+  const fullWsUrl = `${serverUrl}/${clientId}`;
 
   // Callback refs
   const audioReceivedCallbackRef = useRef<
@@ -99,7 +109,8 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
       setIsConnecting(true);
       statusChangeCallbackRef.current?.('connecting');
 
-      wsRef.current = new WebSocket(serverUrl);
+      console.log('Attempting to connect to WebSocket at:', fullWsUrl);
+      wsRef.current = new WebSocket(fullWsUrl);
 
       wsRef.current.onopen = () => {
         setIsConnected(true);
@@ -176,7 +187,7 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
       setIsConnecting(false);
       errorCallbackRef.current?.('Failed to connect to WebSocket server');
     }
-  }, [serverUrl]);
+  }, [fullWsUrl]);
 
   const disconnect = useCallback(() => {
     if (wsRef.current) {

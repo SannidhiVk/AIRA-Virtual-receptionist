@@ -23,6 +23,7 @@ dependencies = [
     "uvicorn>=0.34.3",
     "ollama>=0.6.1",
     "faster-whisper>=1.2.1",
+    "black>=25.1.0",
 ]
 
 [project.optional-dependencies]

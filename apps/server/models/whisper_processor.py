@@ -16,12 +16,13 @@ class WhisperProcessor:
         return cls._instance
 
     def __init__(self):
-        logger.info("Initializing faster-whisper model (distil-large-v3, CPU int8)...")
+        logger.info(
+            "Initializing faster-whisper model (distil-large-v3, CUDA float16)..."
+        )
         self.model = WhisperModel(
             "distil-large-v3",
-            device="cpu",
-            compute_type="int8",
-            cpu_threads=4,
+            device="cuda",
+            compute_type="float16",
         )
         # Threshold for raw audio volume (0.0 to 1.0)
         # If the average volume is below this, we don't even transcribe.

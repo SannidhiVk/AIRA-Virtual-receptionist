@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import numpy as np
+import torch
 
 try:
     from kokoro import KPipeline
@@ -11,11 +12,6 @@ logger = logging.getLogger(__name__)
 
 
 class KokoroTTSProcessor:
-    def __init__(self):
-        if KPipeline is None:
-            raise RuntimeError("Kokoro TTS not available")
-        self.pipeline = KPipeline()
-
     _instance = None
 
     @classmethod
@@ -25,10 +21,23 @@ class KokoroTTSProcessor:
         return cls._instance
 
     def __init__(self):
-        logger.info("Initializing Kokoro TTS processor...")
+        if KPipeline is None:
+            raise RuntimeError("Kokoro TTS not available")
+
+        # Prefer CUDA if available
+        if torch.cuda.is_available():
+            device = "cuda"
+        else:
+            device = "cpu"
+            logger.warning(
+                "CUDA not available; Kokoro TTS will run on CPU instead of GPU."
+            )
+
+        logger.info(f"Initializing Kokoro TTS processor on device='{device}'...")
+
         try:
-            # Initialize Kokoro TTS pipeline
-            self.pipeline = KPipeline(lang_code="a")
+            # Initialize Kokoro TTS pipeline on the chosen device
+            self.pipeline = KPipeline(lang_code="a", device=device)
 
             # Set voice
             self.default_voice = "af_sarah"
