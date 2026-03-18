@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import numpy as np
+import torch
 from faster_whisper import WhisperModel
 
 logger = logging.getLogger(__name__)
@@ -16,17 +17,25 @@ class WhisperProcessor:
         return cls._instance
 
     def __init__(self):
+        if torch.cuda.is_available():
+            self.device = "cuda"
+            self.compute_type = "float16"
+        else:
+            self.device = "cpu"
+            self.compute_type = "int8"
+            logger.warning("CUDA not available; faster-whisper will run on CPU.")
+
         logger.info(
-            "Initializing faster-whisper model (distil-large-v3, CUDA float16)..."
+            f"Initializing faster-whisper model (distil-large-v3, {self.device} {self.compute_type})..."
         )
         self.model = WhisperModel(
             "distil-large-v3",
-            device="cuda",
-            compute_type="float16",
+            device=self.device,
+            compute_type=self.compute_type,
         )
         # Threshold for raw audio volume (0.0 to 1.0)
         # If the average volume is below this, we don't even transcribe.
-        self.MIN_ENERGY_THRESHOLD = 0.005
+        self.MIN_ENERGY_THRESHOLD = 0.004
 
         # Common Whisper hallucinations during silence
 

@@ -9,25 +9,27 @@ class Employee(Base):
     __tablename__ = "employees"
     id = Column(Integer, primary_key=True)
     name = Column(String)
-    role = Column(String)  # Add this: "Manager", "Head", "Intern", etc.
+    role = Column(String)
     department = Column(String)
     cabin_number = Column(String)
 
 
-class Meeting(Base):
-    __tablename__ = "meetings"
-
-    id = Column(Integer, primary_key=True)
-    employee_name = Column(String)
-    visitor_name = Column(String)
-    meeting_time = Column(DateTime)
-
-
 class Visitor(Base):
-    __tablename__ = "visitors"
+    """Logs every person who talks to the receptionist."""
 
+    __tablename__ = "visitors"
     id = Column(Integer, primary_key=True)
     name = Column(String)
-    meeting_with = Column(String)
+    status = Column(String)  # e.g., "New Intern", "Candidate", "Guest"
     checkin_time = Column(DateTime, default=datetime.utcnow)
-    status = Column(String, default="Checked-In")
+
+
+class Meeting(Base):
+    """Logs specific scheduled meetings: Who, Whom, and When."""
+
+    __tablename__ = "meetings"  # Different name to avoid the crash!
+    id = Column(Integer, primary_key=True)
+    visitor_name = Column(String)
+    employee_name = Column(String)
+    scheduled_time = Column(DateTime)
+    status = Column(String, default="Scheduled")

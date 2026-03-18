@@ -31,18 +31,22 @@ def check_faster_whisper():
 
     try:
         # Use a small model to keep the check lightweight
-        model = WhisperModel("tiny", device="cuda", compute_type="float16")
-        print("Initialized faster-whisper model successfully.")
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        compute_type = "float16" if device == "cuda" else "int8"
+        model = WhisperModel("tiny", device=device, compute_type=compute_type)
+        print(
+            f"Initialized faster-whisper model on {device} ({compute_type}) successfully."
+        )
         try:
             # Some versions expose a device attribute; if not, this will be skipped.
-            device = getattr(model, "device", "cuda (assumed)")
-            print("faster-whisper device:", device)
+            device_attr = getattr(model, "device", f"{device} (assumed)")
+            print("faster-whisper device:", device_attr)
         except Exception:
             print(
-                "faster-whisper initialized on CUDA (float16) – device attribute not available."
+                f"faster-whisper initialized on {device} ({compute_type}) – device attribute not available."
             )
     except Exception as e:
-        print("Failed to initialize faster-whisper on CUDA:", repr(e))
+        print(f"Failed to initialize faster-whisper on {device}:", repr(e))
     print()
 
 
@@ -54,10 +58,11 @@ def check_kokoro():
         return
 
     try:
-        pipeline = KPipeline(lang_code="a", device="cuda")
-        print("Initialized Kokoro KPipeline with device='cuda' successfully.")
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        pipeline = KPipeline(lang_code="a", device=device)
+        print(f"Initialized Kokoro KPipeline with device='{device}' successfully.")
     except Exception as e:
-        print("Failed to initialize Kokoro KPipeline on CUDA:", repr(e))
+        print(f"Failed to initialize Kokoro KPipeline on {device}:", repr(e))
     print()
 
 
