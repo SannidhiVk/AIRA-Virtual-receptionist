@@ -2,6 +2,7 @@
 node_modules/
 .pnpm-store/
 apps/server/credentials.json
+apps/server/token.json
 # IDE
 .idea/
 .vscode/
