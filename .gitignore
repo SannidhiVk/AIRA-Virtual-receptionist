@@ -3,6 +3,8 @@ node_modules/
 .pnpm-store/
 apps/server/credentials.json
 apps/server/token.json
+apps/server/GROQ_API_KEY.txt
+.env
 # IDE
 .idea/
 .vscode/
