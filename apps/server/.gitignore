@@ -7,6 +7,10 @@ __pycache__/
 htmlcov/
 .venv/
 
+apps/server/GROQ_API_KEY.txt
+.env
+
+
 # Distribution / packaging
 dist/
 build/
