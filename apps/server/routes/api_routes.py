@@ -3,7 +3,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from managers.connection_manager import manager
-from services.query_router import route_query
+from main import process_text_for_client
 
 logger = logging.getLogger(__name__)
 
@@ -28,5 +28,5 @@ async def handle_text_query(payload: QueryRequest):
     Instead of calling the LLM directly, this routes the query through
     the intent detector and database grounding workflow.
     """
-    reply = await route_query(payload.query)
+    reply = await process_text_for_client("api", payload.query)
     return {"response": reply}

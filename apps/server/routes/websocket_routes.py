@@ -8,7 +8,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from managers.connection_manager import manager
 from models.whisper_processor import WhisperProcessor
 from models.tts_processor import KokoroTTSProcessor
-from services.query_router import route_query
+from main import process_text_for_client
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +104,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     manager.client_state[client_id] = "THINKING"
 
                     # Route query through intent detection + DB grounding + LLM
-                    reply_text = await route_query(text)
+                    reply_text = await process_text_for_client(client_id, text)
                     logger.info(f"Grounded reply: '{reply_text}'")
 
                     # Synthesize speech with Kokoro TTS (non-blocking)

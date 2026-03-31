@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from models.whisper_processor import WhisperProcessor
-from models.ollama_processor import OllamaProcessor
+from models.groq_processor import GroqProcessor
 from models.tts_processor import KokoroTTSProcessor
 from receptionist.database import engine
 from receptionist.models import Base
@@ -20,7 +20,7 @@ async def lifespan(app: FastAPI):
     try:
         # Initialize processors to load models
         whisper_processor = WhisperProcessor.get_instance()
-        ollama_processor = OllamaProcessor.get_instance()
+        llm_processor = GroqProcessor.get_instance()
         tts_processor = KokoroTTSProcessor.get_instance()
 
         # Initialize receptionist database (SQLite)

@@ -18,6 +18,7 @@ import {
   CardHeader,
   CardTitle
 } from '@/components/ui/card';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   Collapsible,
   CollapsibleContent,
@@ -296,6 +297,9 @@ const VoiceActivityDetector: React.FC<VoiceActivityDetectorProps> = ({
   const [currentEnergy, setCurrentEnergy] = useState(0);
   const [isSpeechActive, setIsSpeechActive] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [micError, setMicError] = useState<string | null>(null);
+  const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([]);
+  const [selectedMicId, setSelectedMicId] = useState<string>('default');
   const [transmissionMode, setTransmissionMode] = useState<
     'audio' | 'audio+image' | 'none'
   >('none');
@@ -341,6 +345,37 @@ const VoiceActivityDetector: React.FC<VoiceActivityDetectorProps> = ({
   useEffect(() => {
     connect();
   }, [connect]);
+
+  const refreshAudioInputs = useCallback(async () => {
+    try {
+      if (!navigator?.mediaDevices?.enumerateDevices) return;
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const inputs = devices.filter((d) => d.kind === 'audioinput');
+      setAudioInputs(inputs);
+      if (inputs.length > 0 && selectedMicId === 'default') {
+        // Keep default unless user picks otherwise
+        setSelectedMicId('default');
+      }
+    } catch (e) {
+      // Ignore; some browsers require permission first
+    }
+  }, [selectedMicId]);
+
+  useEffect(() => {
+    refreshAudioInputs();
+    if (navigator?.mediaDevices?.addEventListener) {
+      navigator.mediaDevices.addEventListener(
+        'devicechange',
+        refreshAudioInputs
+      );
+      return () => {
+        navigator.mediaDevices.removeEventListener(
+          'devicechange',
+          refreshAudioInputs
+        );
+      };
+    }
+  }, [refreshAudioInputs]);
 
   // Update transmission mode based on camera stream
   useEffect(() => {
@@ -607,14 +642,39 @@ const VoiceActivityDetector: React.FC<VoiceActivityDetectorProps> = ({
   // Start listening
   const startListening = useCallback(async () => {
     try {
+      setMicError(null);
+
+      if (!navigator?.mediaDevices?.getUserMedia) {
+        setMicError('Microphone not supported in this browser.');
+        return;
+      }
+
+      // Enumerating devices can return 0 until permission is granted (or in some VM/RDP setups).
+      // So: try a permissive `audio: true` first, then fall back to selected device constraints.
+      // This removes unnecessary coupling between enumeration and capture.
+      await refreshAudioInputs();
+
+      const hasKnownInputs = audioInputs.length > 0;
+      const wantsSpecificMic = selectedMicId && selectedMicId !== 'default';
+      const canUseSelectedMic =
+        wantsSpecificMic &&
+        (!hasKnownInputs ||
+          audioInputs.some((d) => d.deviceId === selectedMicId));
+
+      const audioConstraints: MediaTrackConstraints | boolean = !hasKnownInputs
+        ? true
+        : {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            // Prefer a specific device if selected (or default if not).
+            // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+            // @ts-ignore - deviceId is valid but TS libdefs vary
+            ...(canUseSelectedMic ? { deviceId: { exact: selectedMicId } } : {})
+          };
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          sampleRate: config.sampleRate,
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        }
+        audio: audioConstraints
       });
 
       mediaStreamRef.current = stream;
@@ -638,9 +698,25 @@ const VoiceActivityDetector: React.FC<VoiceActivityDetectorProps> = ({
       console.log('🚀 Started voice detection');
     } catch (error) {
       console.error('Failed to start listening:', error);
-      alert('Failed to access microphone');
+      const e = error as any;
+      const message =
+        e?.name === 'NotAllowedError' || e?.name === 'PermissionDeniedError'
+          ? 'Microphone permission was denied. Please allow microphone access for this site and try again.'
+          : e?.name === 'NotFoundError' || e?.name === 'DevicesNotFoundError'
+            ? 'No microphone device was found.'
+            : e?.message
+              ? `Failed to access microphone: ${e.message}`
+              : 'Failed to access microphone.';
+      setMicError(message);
     }
-  }, [config.sampleRate, initializeAudioWorklet, processAudioData]);
+  }, [
+    config.sampleRate,
+    initializeAudioWorklet,
+    processAudioData,
+    refreshAudioInputs,
+    selectedMicId,
+    audioInputs
+  ]);
 
   // Stop listening
   const stopListening = useCallback(() => {
@@ -697,6 +773,51 @@ const VoiceActivityDetector: React.FC<VoiceActivityDetectorProps> = ({
       </CardHeader>
 
       <CardContent className="space-y-6">
+        {micError && (
+          <Alert variant="destructive">
+            <AlertDescription>{micError}</AlertDescription>
+          </Alert>
+        )}
+
+        {/* Mic device selector (helps debug "no device found") */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium">Microphone device</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={refreshAudioInputs}
+              disabled={isListening}
+            >
+              Refresh
+            </Button>
+          </div>
+          <p className="text-muted-foreground text-xs">
+            Detected audio inputs: {audioInputs.length}
+          </p>
+          {audioInputs.length === 0 && (
+            <p className="text-muted-foreground text-xs">
+              If you are using a VM or Remote Desktop, enable remote
+              microphone/audio redirection and make sure Windows has an active
+              input device selected (Settings to Sound to Input).
+            </p>
+          )}
+          <select
+            className="w-full rounded-md border px-3 py-2 text-sm"
+            value={selectedMicId}
+            onChange={(e) => setSelectedMicId(e.target.value)}
+            disabled={isListening}
+          >
+            <option value="default">Default</option>
+            {audioInputs.map((d) => (
+              <option key={d.deviceId} value={d.deviceId}>
+                {d.label || `Microphone (${d.deviceId.slice(0, 6)}...)`}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {/* Main Controls */}
         <div className="flex items-center justify-center space-x-4">
           <Button
