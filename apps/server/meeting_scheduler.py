@@ -11,6 +11,7 @@ from receptionist.database import (
     schedule_meeting,
 )
 from models.groq_processor import GroqProcessor
+from client_context import get_last_employee_name
 
 logger = logging.getLogger(__name__)
 
@@ -389,6 +390,24 @@ async def handle_meeting_request(
             state["meeting_time"] = _normalize_time(extracted.get("time"))
         if extracted.get("purpose") and not state.get("purpose"):
             state["purpose"] = extracted.get("purpose")
+
+        # ✅ Pronoun resolution: if no employee was extracted (e.g. user said
+        # "schedule a meeting with him/her"), fall back to the last looked-up
+        # employee from this client's session.
+        PRONOUNS = {"him", "her", "them", "he", "she", "that person", "someone", "this guy"}
+        raw_emp = (state.get("employee_query") or "").strip().lower()
+        if not state.get("employee_query") or raw_emp in PRONOUNS:
+            fallback = get_last_employee_name(client_id)
+            if fallback:
+                logger.info(
+                    "Pronoun/missing employee resolved from context: %r -> %r",
+                    state.get("employee_query"),
+                    fallback,
+                )
+                state["employee_query"] = fallback
+            elif raw_emp in PRONOUNS:
+                # Pronoun but no prior context — clear the bad value and ask
+                state["employee_query"] = None
 
         # Resolve employee record
         if not state.get("employee_query"):

@@ -107,8 +107,14 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     reply_text = await process_text_for_client(client_id, text)
                     logger.info(f"Grounded reply: '{reply_text}'")
 
+                    # Skip synthesis if there's nothing meaningful to say
+                    if not reply_text or not reply_text.strip():
+                        text_queue.task_done()
+                        manager.client_state[client_id] = "WAITING_FOR_PLAYBACK"
+                        continue
+
                     # Synthesize speech with Kokoro TTS (non-blocking)
-                    audio, word_timings = await tts_processor.synthesize_initial_speech_with_timing(  # type: ignore[attr-defined]
+                    audio, word_timings = await tts_processor.synthesize_remaining_speech_with_timing(  # type: ignore[attr-defined]
                         reply_text
                     )
 

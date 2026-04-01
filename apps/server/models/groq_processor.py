@@ -61,11 +61,59 @@ Output: {"intent": "schedule_meeting", "entities": {"time": "2:00 PM"}}
 """
 
 
+def _load_dotenv_from_any_location() -> None:
+    """
+    Manually load .env from the most likely locations because uv does not
+    automatically inject .env variables into the subprocess environment.
+    We try several candidate paths so this works regardless of where the
+    .env file lives relative to the project root.
+    """
+    try:
+        from dotenv import load_dotenv as _load
+        here = Path(__file__).resolve()
+        candidates = [
+            here.parent / ".env",                    # apps/server/.env
+            here.parent.parent / ".env",             # apps/.env
+            here.parent.parent.parent / ".env",      # project root .env
+        ]
+        for path in candidates:
+            if path.exists():
+                _load(dotenv_path=str(path), override=False)
+                logger.info("Loaded .env from: %s", path)
+                return
+        logger.warning("No .env file found in: %s", [str(c) for c in candidates])
+    except ImportError:
+        # python-dotenv not installed — parse manually
+        here = Path(__file__).resolve()
+        candidates = [
+            here.parent / ".env",
+            here.parent.parent / ".env",
+            here.parent.parent.parent / ".env",
+        ]
+        for path in candidates:
+            if path.exists():
+                try:
+                    for line in path.read_text(encoding="utf-8").splitlines():
+                        line = line.strip()
+                        if not line or line.startswith("#") or "=" not in line:
+                            continue
+                        k, _, v = line.partition("=")
+                        k, v = k.strip(), v.strip().strip('"').strip("'")
+                        if k and k not in os.environ:
+                            os.environ[k] = v
+                    logger.info("Manually parsed .env from: %s", path)
+                    return
+                except Exception as e:
+                    logger.error("Failed to parse .env at %s: %s", path, e)
+
+
 def _read_api_key() -> str:
     """
-    Prefer GROQ_API_KEY environment variable.
-    Fallback: apps/server/GROQ_API_KEY.txt (keeps your previous local workflow).
+    Load .env first, then read GROQ_API_KEY.
+    Fallback: GROQ_API_KEY.txt for legacy local workflow.
     """
+    _load_dotenv_from_any_location()
+
     env_key = os.getenv("GROQ_API_KEY", "").strip()
     if env_key:
         return env_key
@@ -74,10 +122,17 @@ def _read_api_key() -> str:
         base_dir = Path(__file__).resolve().parent.parent
         key_path = base_dir / "GROQ_API_KEY.txt"
         if key_path.exists():
-            return key_path.read_text(encoding="utf-8").strip()
+            key = key_path.read_text(encoding="utf-8").strip()
+            if key:
+                logger.info("Loaded GROQ_API_KEY from GROQ_API_KEY.txt")
+                return key
     except Exception as e:
         logger.error("Failed reading GROQ_API_KEY.txt: %s", e)
 
+    logger.error(
+        "GROQ_API_KEY not found! Checked env, .env file, and GROQ_API_KEY.txt. "
+        "Make sure your .env exists at apps/server/.env or the project root."
+    )
     return ""
 
 
@@ -128,7 +183,18 @@ class GroqProcessor:
 
     def __init__(self):
         api_key = _read_api_key()
-        self.client = AsyncGroq(api_key=api_key)
+
+        # Guard against GROQ_BASE_URL env var doubling the path.
+        # The Groq SDK already uses https://api.groq.com as its default —
+        # passing a base_url that already includes /openai/v1 causes the SDK
+        # to produce /openai/v1/openai/v1/... (404).  Only pass base_url if
+        # the env var is set AND looks like a bare host (no path component).
+        raw_base = os.getenv("GROQ_BASE_URL", "").strip().rstrip("/")
+        if raw_base and "/openai" not in raw_base:
+            self.client = AsyncGroq(api_key=api_key, base_url=raw_base)
+        else:
+            # Let the SDK use its own default — never pass a broken base_url.
+            self.client = AsyncGroq(api_key=api_key)
         self.model_name = MODEL
         self.history: List[Dict[str, str]] = []
         logger.info("GroqProcessor initialized with model '%s'", self.model_name)
@@ -166,7 +232,7 @@ class GroqProcessor:
             return content
         except Exception as e:
             logger.error("Groq chat error: %s", e)
-            return "Welcome to Sharp Software Technology. How can I help you?"
+            return "I'm sorry, I didn't catch that. Could you please repeat?"
 
     async def extract_intent_and_entities(self, user_query: str) -> Dict[str, Any]:
         raw = None
