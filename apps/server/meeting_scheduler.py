@@ -307,21 +307,21 @@ async def handle_meeting_request(
                     "Sorry - I had trouble saving that meeting. Could you try again?",
                 )
 
-            # Non-blocking email/ICS invite (SMTP-based)
+            # Non-blocking Google Calendar invite
             if state.get("employee_email"):
                 try:
-                    from services.notify_email import send_calendar_invite
+                    from services.calendar_service import send_calendar_invite
+
+                    invite_dt = datetime.strptime(
+                        f"{meeting_date} {meeting_time}", "%Y-%m-%d %H:%M"
+                    )
 
                     asyncio.create_task(
                         asyncio.to_thread(
                             send_calendar_invite,
-                            emp_name,  # employee_name
+                            organizer_name,  # visitor_name
                             state["employee_email"],  # employee_email
-                            organizer_name,  # organizer_name
-                            meeting_date,
-                            meeting_time,
-                            purpose,
-                            None,  # organizer_email (optional CC)
+                            invite_dt,  # datetime
                         )
                     )
                 except Exception as e:
