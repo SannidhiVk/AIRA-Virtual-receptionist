@@ -338,7 +338,8 @@ const VoiceActivityDetector: React.FC<VoiceActivityDetectorProps> = ({
     connect,
     sendAudioSegment,
     sendImage,
-    sendAudioWithImage
+    sendAudioWithImage,
+    sendWakeWord
   } = useWebSocketContext();
 
   // Auto-connect to WebSocket on mount
@@ -695,6 +696,11 @@ const VoiceActivityDetector: React.FC<VoiceActivityDetectorProps> = ({
 
       source.connect(workletNode);
       setIsListening(true);
+
+      // Notify backend that a visitor has activated the mic.
+      // This triggers the welcome message and opens the conversation.
+      sendWakeWord();
+
       console.log('🚀 Started voice detection');
     } catch (error) {
       console.error('Failed to start listening:', error);
@@ -715,7 +721,8 @@ const VoiceActivityDetector: React.FC<VoiceActivityDetectorProps> = ({
     processAudioData,
     refreshAudioInputs,
     selectedMicId,
-    audioInputs
+    audioInputs,
+    sendWakeWord
   ]);
 
   // Stop listening

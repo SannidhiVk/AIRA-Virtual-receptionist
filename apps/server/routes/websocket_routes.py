@@ -8,11 +8,19 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from managers.connection_manager import manager
 from models.whisper_processor import WhisperProcessor
 from models.tts_processor import KokoroTTSProcessor
-from main import process_text_for_client
+from services.query_router import route_query, clear_session_state
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+COMPANY_NAME = "Sharp Software Development India Pvt Ltd"
+
+WELCOME_MESSAGE = (
+    f"Welcome to {COMPANY_NAME}! "
+    "I'm AlmostHuman, your virtual receptionist. "
+    "How can I help you today?"
+)
 
 
 @router.websocket("/ws/{client_id}")
@@ -20,84 +28,88 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     """WebSocket endpoint for real-time Receptionist AI interaction (audio-only)."""
     await manager.connect(websocket, client_id)
 
-    # Get instances of processors
     whisper_processor = WhisperProcessor.get_instance()
     tts_processor = KokoroTTSProcessor.get_instance()
 
-    # Per-connection text queue
+    # Per-connection queue: STT text → brain
     text_queue: asyncio.Queue[str] = asyncio.Queue()
 
+    # Tracks whether this session has been welcomed yet.
+    # Set to True only when wake_word_detected arrives from the frontend.
+    session_started = False
+
     try:
-        # Send initial configuration confirmation
+        # ── Confirm connection (silent — no welcome yet) ───────────────────
         await websocket.send_text(
             json.dumps({"status": "connected", "client_id": client_id})
         )
 
+        # ── Keepalive ─────────────────────────────────────────────────────
         async def send_keepalive():
-            """Send periodic keepalive pings."""
             while True:
                 try:
                     await websocket.send_text(
                         json.dumps({"type": "ping", "timestamp": time.time()})
                     )
-                    await asyncio.sleep(10)  # Send ping every 10 seconds
+                    await asyncio.sleep(10)
                 except Exception:
                     break
 
+        # ── Listener: audio → STT → queue ────────────────────────────────
         async def listener():
-            """Receive audio from client, run STT, and enqueue transcribed text."""
+            nonlocal session_started
             try:
                 while True:
                     data = await websocket.receive_text()
                     try:
                         message = json.loads(data)
 
-                        # Handle complete audio segments from frontend
+                        # ── Wake word detected → greet and open mic ───────
+                        # Your wake word library (e.g. Porcupine / openWakeWord)
+                        # should send:  { "wake_word_detected": true }
+                        # when it hears the trigger phrase.
+                        if message.get("wake_word_detected"):
+                            if not session_started:
+                                session_started = True
+                                logger.info(f"[{client_id}] Wake word detected — greeting visitor")
+                                await _send_tts_response(
+                                    websocket, tts_processor, WELCOME_MESSAGE, client_id
+                                )
+                            else:
+                                # Already in a session — wake word just re-opens the mic,
+                                # no need to re-greet.
+                                logger.info(f"[{client_id}] Wake word re-detected mid-session")
+                            continue
+
+                        # ── Audio segment — only process after session starts ──
                         if "audio_segment" in message:
+                            if not session_started:
+                                # Ignore audio before wake word fires
+                                continue
+
                             audio_data = base64.b64decode(message["audio_segment"])
-                            logger.info(
-                                f"Received audio-only segment: {len(audio_data)} bytes"
-                            )
+                            logger.info(f"Audio segment received: {len(audio_data)} bytes")
 
-                            # Transcribe using faster-whisper (CPU)
-                            transcribed_text = await whisper_processor.transcribe_audio(
-                                audio_data
-                            )
-                            logger.info(
-                                f"Listener transcription result: '{transcribed_text}'"
-                            )
+                            transcribed_text = await whisper_processor.transcribe_audio(audio_data)
+                            logger.info(f"STT result: '{transcribed_text}'")
 
-                            if transcribed_text in [
-                                "NOISE_DETECTED",
-                                "NO_SPEECH",
-                                None,
-                            ]:
+                            if transcribed_text in ("NOISE_DETECTED", "NO_SPEECH", None, ""):
                                 continue
 
                             await text_queue.put(transcribed_text)
 
-                        # Ignore non-audio payloads for the Receptionist AI
-
                     except json.JSONDecodeError as e:
-                        logger.error(f"Error decoding JSON: {e}")
-                        await websocket.send_text(
-                            json.dumps({"error": "Invalid JSON format"})
-                        )
-                    except KeyError as e:
-                        logger.error(f"Missing key in message: {e}")
-                        await websocket.send_text(
-                            json.dumps({"error": f"Missing required field: {e}"})
-                        )
+                        logger.error(f"JSON decode error: {e}")
+                        await websocket.send_text(json.dumps({"error": "Invalid JSON"}))
                     except Exception as e:
-                        logger.error(f"Error processing message: {e}")
-                        await websocket.send_text(
-                            json.dumps({"error": f"Processing error: {str(e)}"})
-                        )
-            except WebSocketDisconnect:
-                logger.info("WebSocket connection closed during listener loop")
+                        logger.error(f"Listener error: {e}")
+                        await websocket.send_text(json.dumps({"error": str(e)}))
 
+            except WebSocketDisconnect:
+                logger.info("WebSocket closed during listener")
+
+        # ── Brain: text → route_query → TTS → send audio ─────────────────
         async def brain():
-            """Consume transcribed text, route through query_router, synthesize TTS, and send audio."""
             try:
                 while True:
                     text = await text_queue.get()
@@ -107,8 +119,14 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     reply_text = await process_text_for_client(client_id, text)
                     logger.info(f"Grounded reply: '{reply_text}'")
 
+                    # Skip synthesis if there's nothing meaningful to say
+                    if not reply_text or not reply_text.strip():
+                        text_queue.task_done()
+                        manager.client_state[client_id] = "WAITING_FOR_PLAYBACK"
+                        continue
+
                     # Synthesize speech with Kokoro TTS (non-blocking)
-                    audio, word_timings = await tts_processor.synthesize_initial_speech_with_timing(  # type: ignore[attr-defined]
+                    audio, word_timings = await tts_processor.synthesize_remaining_speech_with_timing(  # type: ignore[attr-defined]
                         reply_text
                     )
 
@@ -133,18 +151,16 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     manager.client_state[client_id] = "WAITING_FOR_PLAYBACK"
 
             except WebSocketDisconnect:
-                logger.info("WebSocket connection closed during brain loop")
+                logger.info("WebSocket closed during brain loop")
             except Exception as e:
-                logger.error(f"Brain task error for client {client_id}: {e}")
+                logger.error(f"Brain task error for {client_id}: {e}")
 
-        # Run tasks concurrently
+        # ── Run all three concurrently ────────────────────────────────────
         listener_task = asyncio.create_task(listener())
         brain_task = asyncio.create_task(brain())
         keepalive_task = asyncio.create_task(send_keepalive())
 
-        # Track tasks in manager for potential cancellation
         manager.current_tasks[client_id]["processing"] = brain_task
-        manager.current_tasks[client_id]["tts"] = None
 
         done, pending = await asyncio.wait(
             [listener_task, brain_task, keepalive_task],
@@ -160,16 +176,15 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
         for task in done:
             try:
-                _ = task.result()
+                task.result()
             except Exception as e:
-                logger.error(f"Task finished with error: {e}")
+                logger.error(f"Task ended with error: {e}")
 
     except WebSocketDisconnect:
         logger.info(f"Client {client_id} disconnected normally")
     except Exception as e:
-        logger.error(f"WebSocket session error for client {client_id}: {e}")
+        logger.error(f"WebSocket session error for {client_id}: {e}")
     finally:
-        # Cleanup
-        logger.info(f"Cleaning up resources for client {client_id}")
+        logger.info(f"Cleaning up for {client_id}")
         await manager.cancel_current_tasks(client_id)
         manager.disconnect(client_id)
