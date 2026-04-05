@@ -53,7 +53,7 @@ async def process_text_for_client(client_id: str, text: str) -> str:
         get_employee_by_name_or_role,
         get_similar_employee,
         add_visitor,
-        log_reception_entry
+        log_reception_entry,
     )
     from models.groq_processor import GroqProcessor
 
@@ -71,9 +71,9 @@ async def process_text_for_client(client_id: str, text: str) -> str:
     # =========================================================
     # NEW FIX: CHECK-IN & DATABASE LOGGING LOGIC
     # =========================================================
-    is_check_in = (
-        intent == "check_in" 
-        or any(phrase in text_lower for phrase in ["check in", "checking in", "here to see", "my name is"])
+    is_check_in = intent == "check_in" or any(
+        phrase in text_lower
+        for phrase in ["check in", "checking in", "here to see", "my name is"]
     )
 
     if is_check_in:
@@ -86,7 +86,7 @@ async def process_text_for_client(client_id: str, text: str) -> str:
 
         # Step A: Check if this is actually an Employee arriving (e.g., "I'm Rohit")
         emp_match = get_similar_employee(visitor_name)
-        
+
         # If it's an employee (and they aren't here to meet someone else)
         if emp_match and not employee_to_meet:
             # ONLY add to ReceptionLog, skip the Visitor table
@@ -94,15 +94,17 @@ async def process_text_for_client(client_id: str, text: str) -> str:
                 person_name=emp_match.name,
                 person_type="EMPLOYEE",
                 linked_employee_id=emp_match.id,
-                notes="Employee arrived"
+                notes="Employee arrived",
             )
-            return f"Welcome back, {emp_match.name}. I've logged your arrival for the day."
+            return (
+                f"Welcome back, {emp_match.name}. I've logged your arrival for the day."
+            )
 
         # Step B: Otherwise, treat them as a Visitor
         badge_id, visitor_id = add_visitor(
             name=visitor_name,
             meeting_with=employee_to_meet or "Unknown",
-            purpose="Check-in"
+            purpose="Check-in",
         )
 
         if visitor_id != -1:
@@ -111,9 +113,13 @@ async def process_text_for_client(client_id: str, text: str) -> str:
                 person_name=visitor_name,
                 person_type="VISITOR",
                 linked_visitor_id=visitor_id,
-                notes=f"Meeting with: {employee_to_meet}" if employee_to_meet else "General visit"
+                notes=(
+                    f"Meeting with: {employee_to_meet}"
+                    if employee_to_meet
+                    else "General visit"
+                ),
             )
-            
+
             if employee_to_meet:
                 return f"Welcome, {visitor_name}. I have successfully checked you in to meet {employee_to_meet}. Please take a seat."
             else:
@@ -124,7 +130,8 @@ async def process_text_for_client(client_id: str, text: str) -> str:
 
     # 3) Employee Lookups
     is_employee_lookup = intent in ["employee_lookup", "role_lookup"] or any(
-        k in text_lower for k in ["who is", "where is", "cabin", "which floor", "extension"]
+        k in text_lower
+        for k in ["who is", "where is", "cabin", "which floor", "extension"]
     )
 
     if is_employee_lookup:
@@ -141,7 +148,9 @@ async def process_text_for_client(client_id: str, text: str) -> str:
             fallback_name = get_last_employee_name(client_id)
             if fallback_name:
                 logger.info(
-                    "Pronoun lookup resolved: %r -> %r", raw_term or "(empty)", fallback_name
+                    "Pronoun lookup resolved: %r -> %r",
+                    raw_term or "(empty)",
+                    fallback_name,
                 )
                 search_term = fallback_name
             else:
@@ -176,11 +185,10 @@ async def process_text_for_client(client_id: str, text: str) -> str:
     last_emp = get_last_employee_name(client_id)
     groq_prompt = text
     if last_emp:
-        groq_prompt = (
-            f"[Context: the visitor was just asking about {last_emp}] {text}"
-        )
+        groq_prompt = f"[Context: the visitor was just asking about {last_emp}] {text}"
 
     return await llm.get_response(groq_prompt)
+
 
 @app.get("/")
 async def health():
