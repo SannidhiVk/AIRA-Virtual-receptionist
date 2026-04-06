@@ -37,6 +37,7 @@ interface WebSocketContextType {
   sendAudioSegment: (audioData: ArrayBuffer) => void;
   sendImage: (imageData: string) => void;
   sendAudioWithImage: (audioData: ArrayBuffer, imageData: string) => void;
+  sendWakeWord: () => void;
   onAudioReceived: (
     callback: (
       audioData: string,
@@ -215,6 +216,13 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
     }
   }, []);
 
+  const sendWakeWord = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ wake_word_detected: true }));
+      console.log('Wake word event sent to server');
+    }
+  }, []);
+
   const sendImage = useCallback((imageData: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       const message = {
@@ -289,6 +297,7 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
     sendAudioSegment,
     sendImage,
     sendAudioWithImage,
+    sendWakeWord,
     onAudioReceived,
     onInterrupt,
     onError,

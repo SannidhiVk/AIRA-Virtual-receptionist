@@ -26,6 +26,7 @@ def get_connection():
     return conn
 
 
+# test
 ALL_SLOTS_1H = [
     "09:00",
     "10:00",

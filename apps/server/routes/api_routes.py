@@ -3,7 +3,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from managers.connection_manager import manager
-from main import process_text_for_client
+from services.query_router import route_query
 
 logger = logging.getLogger(__name__)
 
@@ -12,11 +12,12 @@ router = APIRouter()
 
 class QueryRequest(BaseModel):
     query: str
+    client_id: str = "api"   # REST callers can optionally pass their own session ID
 
 
 @router.get("/stats")
 async def get_stats():
-    """Get server statistics (voice-only)"""
+    """Get server statistics."""
     return manager.get_stats()
 
 
@@ -24,9 +25,7 @@ async def get_stats():
 async def handle_text_query(payload: QueryRequest):
     """
     Main text query endpoint.
-
-    Instead of calling the LLM directly, this routes the query through
-    the intent detector and database grounding workflow.
+    Routes through the full conversation/registration engine, same as WebSocket.
     """
-    reply = await process_text_for_client("api", payload.query)
+    reply = await route_query(payload.client_id, payload.query)
     return {"response": reply}
