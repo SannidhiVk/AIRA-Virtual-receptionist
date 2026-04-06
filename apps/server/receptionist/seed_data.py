@@ -30,7 +30,7 @@ def seed_database() -> None:
                 cabin_number="201",
                 floor="2",
                 extension="201",
-                email="arjun@sharpsoftware.in",
+                email="krutikakanchani847@gmail.com",
                 is_public=1,
             ),
             Employee(
@@ -40,7 +40,7 @@ def seed_database() -> None:
                 cabin_number="202",
                 floor="2",
                 extension="202",
-                email="priya@sharpsoftware.in",
+                email="sannidhivk2004@gmail.com",
                 is_public=1,
             ),
             Employee(
@@ -50,7 +50,7 @@ def seed_database() -> None:
                 cabin_number="305",
                 floor="3",
                 extension="305",
-                email="meera@sharpsoftware.in",
+                email="krutikakanchani847@gmail.com",
                 is_public=1,
             ),
             Employee(
@@ -60,7 +60,7 @@ def seed_database() -> None:
                 cabin_number="110",
                 floor="1",
                 extension="110",
-                email="rohit@sharpsoftware.in",
+                email="sannidhivk2004@gmail.com",
                 is_public=1,
             ),
             Employee(
@@ -70,7 +70,7 @@ def seed_database() -> None:
                 cabin_number="112",
                 floor="1",
                 extension="112",
-                email="neha@sharpsoftware.in",
+                email="krutikakanchani847@gmail.com",
                 is_public=1,
             ),
             Employee(
@@ -80,7 +80,7 @@ def seed_database() -> None:
                 cabin_number="115",
                 floor="1",
                 extension="115",
-                email="vivek@sharpsoftware.in",
+                email="sannidhivk2004@gmail.com",
                 is_public=1,
             ),
             Employee(
@@ -90,7 +90,7 @@ def seed_database() -> None:
                 cabin_number="402",
                 floor="4",
                 extension="402",
-                email="kavya@sharpsoftware.in",
+                email="krutikakanchani847@gmail.com",
                 is_public=1,
             ),
             Employee(
@@ -100,7 +100,7 @@ def seed_database() -> None:
                 cabin_number="101",
                 floor="1",
                 extension="101",
-                email="sanjay@sharpsoftware.in",
+                email="sannidhivk2004@gmail.com",
                 is_public=1,
             ),
             Employee(
@@ -110,7 +110,7 @@ def seed_database() -> None:
                 cabin_number="501",
                 floor="5",
                 extension="501",
-                email="aman@sharpsoftware.in",
+                email="krutikakanchani847@gmail.com",
                 is_public=1,
             ),
             Employee(
@@ -120,7 +120,7 @@ def seed_database() -> None:
                 cabin_number="120",
                 floor="1",
                 extension="120",
-                email="ritu@sharpsoftware.in",
+                email="sannidhivk2004@gmail.com",
                 is_public=1,
             ),
         ]

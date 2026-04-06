@@ -216,4 +216,3 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         logger.info(f"Cleaning up for {client_id}")
         await manager.cancel_current_tasks(client_id)
         manager.disconnect(client_id)
-        clear_session_state(client_id)

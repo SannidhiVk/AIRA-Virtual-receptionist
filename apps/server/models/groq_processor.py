@@ -96,7 +96,20 @@ IMPORTANT:
 def _load_dotenv_from_any_location() -> None:
     try:
         from dotenv import load_dotenv as _load
-
+        here = Path(__file__).resolve()
+        candidates = [
+            here.parent / ".env",                    # apps/server/.env
+            here.parent.parent / ".env",             # apps/.env
+            here.parent.parent.parent / ".env",      # project root .env
+        ]
+        for path in candidates:
+            if path.exists():
+                _load(dotenv_path=str(path), override=False)
+                logger.info("Loaded .env from: %s", path)
+                return
+        logger.warning("No .env file found in: %s", [str(c) for c in candidates])
+    except ImportError:
+        # python-dotenv not installed — parse manually
         here = Path(__file__).resolve()
         candidates = [
             here.parent / ".env",
@@ -297,5 +310,6 @@ Tone: warm, smart, human, professional."""
                 temperature=0.4,
             )
             return _clean_reply(response.choices[0].message.content)
-        except Exception:
-            return "Please head over to the main lobby, and someone will assist you shortly."
+        except Exception as e:
+            logger.error("Grounded response error: %s", e)
+            return "I found the information. Please follow the directions to the cabin."

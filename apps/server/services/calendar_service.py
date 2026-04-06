@@ -19,10 +19,10 @@ def get_calendar_service():
     """Shows basic usage of the Google Calendar API."""
     creds = None
 
-    # paths
-    base_dir = Path(__file__).resolve().parent.parent
-    token_path = base_dir / "token.json"
-    creds_path = base_dir / "credentials.json"
+    # Always resolve credentials/token under apps/server
+    server_dir = Path(__file__).resolve().parent.parent
+    token_path = server_dir / "token.json"
+    creds_path = server_dir / "credentials.json"
 
     if os.path.exists(token_path):
         creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
