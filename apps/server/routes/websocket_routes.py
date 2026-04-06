@@ -28,6 +28,7 @@ WELCOME_MESSAGE = (
 # TTS HELPER — must be at module level, above all callers
 # ─────────────────────────────────────────────
 
+
 async def _send_tts_response(
     websocket: WebSocket,
     tts_processor: KokoroTTSProcessor,
@@ -36,21 +37,25 @@ async def _send_tts_response(
 ) -> None:
     """Synthesise text with Kokoro TTS and push audio + word timings to the client."""
     try:
-        audio, word_timings = await tts_processor.synthesize_remaining_speech_with_timing(text)
+        audio, word_timings = (
+            await tts_processor.synthesize_remaining_speech_with_timing(text)
+        )
 
         if audio is not None and len(audio) > 0:
             audio_bytes = (audio * 32767).astype(np.int16).tobytes()
             base64_audio = base64.b64encode(audio_bytes).decode("utf-8")
 
             await websocket.send_text(
-                json.dumps({
-                    "audio": base64_audio,
-                    "word_timings": word_timings,
-                    "sample_rate": 24000,
-                    "method": "native_kokoro_timing",
-                    "modality": "audio_only",
-                    "text": text,
-                })
+                json.dumps(
+                    {
+                        "audio": base64_audio,
+                        "word_timings": word_timings,
+                        "sample_rate": 24000,
+                        "method": "native_kokoro_timing",
+                        "modality": "audio_only",
+                        "text": text,
+                    }
+                )
             )
             manager.client_state[client_id] = "SPEAKING"
         else:
@@ -67,6 +72,7 @@ async def _send_tts_response(
 # ─────────────────────────────────────────────
 # WEBSOCKET ENDPOINT
 # ─────────────────────────────────────────────
+
 
 @router.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
@@ -105,12 +111,16 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         if message.get("wake_word_detected"):
                             if not session_started:
                                 session_started = True
-                                logger.info(f"[{client_id}] Wake word detected — greeting visitor")
+                                logger.info(
+                                    f"[{client_id}] Wake word detected — greeting visitor"
+                                )
                                 await _send_tts_response(
                                     websocket, tts_processor, WELCOME_MESSAGE, client_id
                                 )
                             else:
-                                logger.info(f"[{client_id}] Wake word re-detected mid-session")
+                                logger.info(
+                                    f"[{client_id}] Wake word re-detected mid-session"
+                                )
                             continue
 
                         if "audio_segment" in message:
@@ -118,12 +128,21 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                 continue
 
                             audio_data = base64.b64decode(message["audio_segment"])
-                            logger.info(f"Audio segment received: {len(audio_data)} bytes")
+                            logger.info(
+                                f"Audio segment received: {len(audio_data)} bytes"
+                            )
 
-                            transcribed_text = await whisper_processor.transcribe_audio(audio_data)
+                            transcribed_text = await whisper_processor.transcribe_audio(
+                                audio_data
+                            )
                             logger.info(f"STT result: '{transcribed_text}'")
 
-                            if transcribed_text in ("NOISE_DETECTED", "NO_SPEECH", None, ""):
+                            if transcribed_text in (
+                                "NOISE_DETECTED",
+                                "NO_SPEECH",
+                                None,
+                                "",
+                            ):
                                 continue
 
                             await text_queue.put(transcribed_text)

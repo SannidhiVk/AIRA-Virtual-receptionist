@@ -12,7 +12,7 @@ router = APIRouter()
 
 class QueryRequest(BaseModel):
     query: str
-    client_id: str = "api"   # REST callers can optionally pass their own session ID
+    client_id: str = "api"  # REST callers can optionally pass their own session ID
 
 
 @router.get("/stats")
