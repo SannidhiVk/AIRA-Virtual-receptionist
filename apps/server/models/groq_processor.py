@@ -70,11 +70,12 @@ def _load_dotenv_from_any_location() -> None:
     """
     try:
         from dotenv import load_dotenv as _load
+
         here = Path(__file__).resolve()
         candidates = [
-            here.parent / ".env",                    # apps/server/.env
-            here.parent.parent / ".env",             # apps/.env
-            here.parent.parent.parent / ".env",      # project root .env
+            here.parent / ".env",  # apps/server/.env
+            here.parent.parent / ".env",  # apps/.env
+            here.parent.parent.parent / ".env",  # project root .env
         ]
         for path in candidates:
             if path.exists():

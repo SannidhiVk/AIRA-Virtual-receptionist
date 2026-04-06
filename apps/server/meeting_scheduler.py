@@ -394,7 +394,16 @@ async def handle_meeting_request(
         # ✅ Pronoun resolution: if no employee was extracted (e.g. user said
         # "schedule a meeting with him/her"), fall back to the last looked-up
         # employee from this client's session.
-        PRONOUNS = {"him", "her", "them", "he", "she", "that person", "someone", "this guy"}
+        PRONOUNS = {
+            "him",
+            "her",
+            "them",
+            "he",
+            "she",
+            "that person",
+            "someone",
+            "this guy",
+        }
         raw_emp = (state.get("employee_query") or "").strip().lower()
         if not state.get("employee_query") or raw_emp in PRONOUNS:
             fallback = get_last_employee_name(client_id)
