@@ -198,24 +198,9 @@ const TalkingHead: React.FC<TalkingHeadProps> = ({
       try {
         await initAudioContext();
 
-        // Convert base64 to audio buffer
+        // Use native Web Audio API to decode the WAV file directly
         const arrayBuffer = base64ToArrayBuffer(base64Audio);
-        const int16Array = new Int16Array(arrayBuffer);
-        const float32Array = int16ArrayToFloat32(int16Array);
-
-        console.log('Audio conversion successful:', {
-          arrayBufferLength: arrayBuffer.byteLength,
-          int16Length: int16Array.length,
-          float32Length: float32Array.length
-        });
-
-        // Create AudioBuffer
-        const audioBuffer = audioContextRef.current!.createBuffer(
-          1,
-          float32Array.length,
-          sampleRate
-        );
-        audioBuffer.copyToChannel(float32Array, 0);
+        const audioBuffer = await audioContextRef.current!.decodeAudioData(arrayBuffer);
 
         console.log('AudioBuffer created:', {
           duration: audioBuffer.duration,

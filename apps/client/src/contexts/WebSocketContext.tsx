@@ -27,6 +27,7 @@ interface WebSocketMessage {
   audio_complete?: boolean;
   error?: string;
   type?: string;
+  state?: string;
 }
 
 interface WebSocketContextType {
@@ -50,6 +51,9 @@ interface WebSocketContextType {
   onError: (callback: (error: string) => void) => void;
   onStatusChange: (
     callback: (status: 'connected' | 'disconnected' | 'connecting') => void
+  ) => void;
+  onServerState: (
+    callback: (state: 'passive' | 'listening' | 'processing' | 'speaking') => void
   ) => void;
 }
 
@@ -102,6 +106,9 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
   const statusChangeCallbackRef = useRef<
     ((status: 'connected' | 'disconnected' | 'connecting') => void) | null
   >(null);
+  const serverStateCallbackRef = useRef<
+    ((state: 'passive' | 'listening' | 'processing' | 'speaking') => void) | null
+  >(null);
 
   const connect = useCallback(async () => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -128,6 +135,10 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
           if (data.status === 'connected') {
             console.log(
               `Server confirmed connection. Client ID: ${data.client_id}`
+            );
+          } else if (data.state) {
+            serverStateCallbackRef.current?.(
+              data.state as 'passive' | 'listening' | 'processing' | 'speaking'
             );
           } else if (data.interrupt) {
             console.log('Received interrupt signal');
@@ -199,20 +210,7 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
 
   const sendAudioSegment = useCallback((audioData: ArrayBuffer) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      // Convert ArrayBuffer to base64
-      const bytes = new Uint8Array(audioData);
-      let binary = '';
-      for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      const base64Audio = btoa(binary);
-
-      const message = {
-        audio_segment: base64Audio
-      };
-
-      wsRef.current.send(JSON.stringify(message));
-      console.log(`Sent audio segment: ${audioData.byteLength} bytes`);
+      wsRef.current.send(audioData);
     }
   }, []);
 
@@ -289,6 +287,15 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
     []
   );
 
+  const onServerState = useCallback(
+    (
+      callback: (state: 'passive' | 'listening' | 'processing' | 'speaking') => void
+    ) => {
+      serverStateCallbackRef.current = callback;
+    },
+    []
+  );
+
   const value: WebSocketContextType = {
     isConnected,
     isConnecting,
@@ -301,7 +308,8 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
     onAudioReceived,
     onInterrupt,
     onError,
-    onStatusChange
+    onStatusChange,
+    onServerState
   };
 
   return (
