@@ -10,8 +10,8 @@ from groq import AsyncGroq
 logger = logging.getLogger(__name__)
 
 MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-AI_NAME = "Sannika"
-COMPANY_NAME = "Sharp Software"
+AI_NAME = "Jarvis"
+COMPANY_NAME = "Sharp Software Development India Pvt. Ltd."
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SYSTEM PROMPT
@@ -80,12 +80,12 @@ FIELD RULES:
     "schedule_meeting"    — wants to BOOK, SCHEDULE, or SET UP a future appointment/meeting.
     "employee_lookup"     — asking where someone/a department is located.
     "facility_request"    — complaining/asking about AC, temperature, lights, wifi, or cleaning.
-    "general_conversation"— asking about office hours, directions, or casual conversation.
+    "general_conversation"— asking about office hours, directions, or casual conversationor questions NOT related to arriving/checking in.
     "confirm"             — yes / go ahead / proceed / please do.
     "cancel"              — no / cancel / never mind / stop.
 
 IMPORTANT:
-- If a visitor says "I want to schedule an appointment" or "book a meeting for tomorrow", the intent MUST be "schedule_meeting".
+- If a visitor identifies themselves ("I am Raj") or their status ("I am a new dev"), the intent MUST be "check_in".
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -96,11 +96,12 @@ IMPORTANT:
 def _load_dotenv_from_any_location() -> None:
     try:
         from dotenv import load_dotenv as _load
+
         here = Path(__file__).resolve()
         candidates = [
-            here.parent / ".env",                    # apps/server/.env
-            here.parent.parent / ".env",             # apps/.env
-            here.parent.parent.parent / ".env",      # project root .env
+            here.parent / ".env",  # apps/server/.env
+            here.parent.parent / ".env",  # apps/.env
+            here.parent.parent.parent / ".env",  # project root .env
         ]
         for path in candidates:
             if path.exists():
@@ -214,8 +215,17 @@ class GroqProcessor:
             return "I'm sorry, I didn't quite catch that. Could you say it again?"
 
     async def get_response(
-        self, client_id: str, prompt: str, company_info: Optional[dict] = None
+        self,
+        client_id: str = "default_client",
+        prompt: Optional[str] = None,
+        company_info: Optional[dict] = None,
     ) -> str:
+
+        # ─── FIX: Fallback if called with only 1 argument (e.g. get_response(prompt)) ───
+        if prompt is None:
+            prompt = client_id
+            client_id = "default_client"
+
         if not prompt:
             return ""
 
