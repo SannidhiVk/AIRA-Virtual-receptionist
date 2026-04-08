@@ -29,9 +29,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.get("/")
 async def health():
     return {"status": "running"}
+
 
 from routes.api_routes import router as api_router
 from routes.websocket_routes import router as websocket_router
@@ -39,11 +41,13 @@ from routes.websocket_routes import router as websocket_router
 app.include_router(api_router)
 app.include_router(websocket_router)
 
+
 def main():
     logger.info("Starting Jarvis Voice Assistant...")
     config = uvicorn.Config(app="main:app", host="0.0.0.0", port=8000, reload=True)
     server = uvicorn.Server(config)
     server.run()
+
 
 if __name__ == "__main__":
     main()

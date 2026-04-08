@@ -38,11 +38,11 @@ logger.info(
 )
 
 SAMPLE_RATE = 16_000
-VAD_FRAME_BYTES = 960          
-OWW_CHUNK_SAMPLES = 1280       
-OWW_CHUNK_BYTES = OWW_CHUNK_SAMPLES * 2   
-SILENCE_FRAME_THRESHOLD = 50   
-OWW_SCORE_LOG_MIN = 0.05       
+VAD_FRAME_BYTES = 960
+OWW_CHUNK_SAMPLES = 1280
+OWW_CHUNK_BYTES = OWW_CHUNK_SAMPLES * 2
+SILENCE_FRAME_THRESHOLD = 50
+OWW_SCORE_LOG_MIN = 0.05
 
 FOLLOWUP_TIMEOUT_SECONDS = float(os.getenv("FOLLOWUP_TIMEOUT", "12.0"))
 
@@ -65,12 +65,30 @@ def _reply_expects_followup(text: str) -> bool:
         return True
 
     followup_phrases = (
-        "your name", "who are you", "who you", "tell me", "could you",
-        "can you", "would you", "what is", "what's", "what time",
-        "what date", "which day", "purpose of", "reason for",
-        "who would you", "who do you", "shall i", "should i",
-        "go ahead", "confirm it", "let me know", "anything else",
-        "help you with", "welcome to sharp software" # Added greeting to followup triggers
+        "your name",
+        "who are you",
+        "who you",
+        "tell me",
+        "could you",
+        "can you",
+        "would you",
+        "what is",
+        "what's",
+        "what time",
+        "what date",
+        "which day",
+        "purpose of",
+        "reason for",
+        "who would you",
+        "who do you",
+        "shall i",
+        "should i",
+        "go ahead",
+        "confirm it",
+        "let me know",
+        "anything else",
+        "help you with",
+        "welcome to sharp software",  # Added greeting to followup triggers
     )
     lower = t.lower()
     return any(lower.endswith(p) or p in lower[-60:] for p in followup_phrases)
@@ -88,23 +106,33 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
     DEBUG_INTERVAL = 5.0
     dbg = {
-        "packets": 0, "oww_chunks": 0, "oww_max_score": 0.0,
-        "vad_speech": 0, "vad_silence": 0, "last_report": time.time(),
-        "last_heartbeat": time.time(), "total_messages": 0,
+        "packets": 0,
+        "oww_chunks": 0,
+        "oww_max_score": 0.0,
+        "vad_speech": 0,
+        "vad_silence": 0,
+        "last_report": time.time(),
+        "last_heartbeat": time.time(),
+        "total_messages": 0,
     }
 
     try:
         await websocket.send_text(
-            json.dumps({"status": "connected", "client_id": client_id, "state": "passive"})
+            json.dumps(
+                {"status": "connected", "client_id": client_id, "state": "passive"}
+            )
         )
         logger.info(f"[SESSION] Client {client_id} connected.")
 
         async def send_keepalive():
             while True:
                 try:
-                    await websocket.send_text(json.dumps({"type": "ping", "timestamp": time.time()}))
+                    await websocket.send_text(
+                        json.dumps({"type": "ping", "timestamp": time.time()})
+                    )
                     await asyncio.sleep(10)
-                except Exception: break
+                except Exception:
+                    break
 
         async def listener():
             oww_carry, vad_carry, audio_buffer = bytearray(), bytearray(), bytearray()
@@ -118,13 +146,20 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     current_mode = session_state["mode"]
 
                     if current_mode == "PASSIVE" and previous_mode != "PASSIVE":
-                        oww_carry.clear(); vad_carry.clear(); audio_buffer.clear()
-                        silence_frames = 0; speech_seen = False
-                        try: ww_service.model.reset()
-                        except: pass
+                        oww_carry.clear()
+                        vad_carry.clear()
+                        audio_buffer.clear()
+                        silence_frames = 0
+                        speech_seen = False
+                        try:
+                            ww_service.model.reset()
+                        except:
+                            pass
                     elif current_mode == "FOLLOWUP" and previous_mode != "FOLLOWUP":
-                        vad_carry.clear(); audio_buffer.clear()
-                        silence_frames = 0; speech_seen = False
+                        vad_carry.clear()
+                        audio_buffer.clear()
+                        silence_frames = 0
+                        speech_seen = False
                         followup_entered_at = time.time()
 
                     previous_mode = current_mode
@@ -136,8 +171,11 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                             msg = json.loads(raw_text)
                             if msg.get("action") == "stop_speaking":
                                 session_state["mode"] = "PASSIVE"
-                                await websocket.send_text(json.dumps({"state": "passive"}))
-                        except: pass
+                                await websocket.send_text(
+                                    json.dumps({"state": "passive"})
+                                )
+                        except:
+                            pass
                         continue
 
                     if raw_bytes:
@@ -152,16 +190,25 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                 triggered, score = ww_service.process_chunk(chunk)
                                 if triggered:
                                     # ── GREETING FIRST LOGIC ──
-                                    logger.info(f"[OWW] 🔔 TRIGGERED! Injecting Greeting.")
+                                    logger.info(
+                                        f"[OWW] 🔔 TRIGGERED! Injecting Greeting."
+                                    )
                                     session_state["mode"] = "PROCESSING"
-                                    await text_queue.put("WAKE_WORD_TRIGGERED") 
-                                    oww_carry.clear(); audio_buffer.clear(); vad_carry.clear()
+                                    await text_queue.put("WAKE_WORD_TRIGGERED")
+                                    oww_carry.clear()
+                                    audio_buffer.clear()
+                                    vad_carry.clear()
                                     break
 
                         elif session_state["mode"] in ("ACTIVE", "FOLLOWUP"):
-                            if current_mode == "FOLLOWUP" and (time.time() - followup_entered_at > FOLLOWUP_TIMEOUT_SECONDS):
+                            if current_mode == "FOLLOWUP" and (
+                                time.time() - followup_entered_at
+                                > FOLLOWUP_TIMEOUT_SECONDS
+                            ):
                                 session_state["mode"] = "PASSIVE"
-                                await websocket.send_text(json.dumps({"state": "passive"}))
+                                await websocket.send_text(
+                                    json.dumps({"state": "passive"})
+                                )
                                 continue
 
                             audio_buffer.extend(raw_bytes)
@@ -170,38 +217,61 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                 frame = bytes(vad_carry[:VAD_FRAME_BYTES])
                                 vad_carry = vad_carry[VAD_FRAME_BYTES:]
                                 is_speech = vad.is_speech(frame, SAMPLE_RATE)
-                                if is_speech: speech_seen = True; silence_frames = 0
-                                else: silence_frames += 1
+                                if is_speech:
+                                    speech_seen = True
+                                    silence_frames = 0
+                                else:
+                                    silence_frames += 1
 
-                            if speech_seen and silence_frames >= SILENCE_FRAME_THRESHOLD:
+                            if (
+                                speech_seen
+                                and silence_frames >= SILENCE_FRAME_THRESHOLD
+                            ):
                                 session_state["mode"] = "PROCESSING"
-                                await websocket.send_text(json.dumps({"state": "processing"}))
+                                await websocket.send_text(
+                                    json.dumps({"state": "processing"})
+                                )
                                 wav_bytes = create_wav_from_pcm(bytes(audio_buffer))
-                                transcribed_text = await whisper_processor.transcribe_audio(wav_bytes)
-                                if transcribed_text and transcribed_text not in ("NOISE_DETECTED", "NO_SPEECH"):
+                                transcribed_text = (
+                                    await whisper_processor.transcribe_audio(wav_bytes)
+                                )
+                                if transcribed_text and transcribed_text not in (
+                                    "NOISE_DETECTED",
+                                    "NO_SPEECH",
+                                ):
                                     await text_queue.put(transcribed_text)
                                 else:
                                     session_state["mode"] = "PASSIVE"
-                                    await websocket.send_text(json.dumps({"state": "passive"}))
-                                audio_buffer.clear(); vad_carry.clear(); silence_frames = 0; speech_seen = False
+                                    await websocket.send_text(
+                                        json.dumps({"state": "passive"})
+                                    )
+                                audio_buffer.clear()
+                                vad_carry.clear()
+                                silence_frames = 0
+                                speech_seen = False
 
-            except Exception as exc: logger.error(f"[LISTENER] Error: {exc}")
+            except Exception as exc:
+                logger.error(f"[LISTENER] Error: {exc}")
 
         async def brain():
             try:
                 while True:
                     text = await text_queue.get()
                     manager.client_state[client_id] = "THINKING"
-                    
+
                     reply_text = await process_text_for_client(client_id, text)
-                    
+
                     if not reply_text or not reply_text.strip():
                         text_queue.task_done()
                         session_state["mode"] = "PASSIVE"
                         await websocket.send_text(json.dumps({"state": "passive"}))
                         continue
 
-                    audio, word_timings = await tts_processor.synthesize_remaining_speech_with_timing(reply_text)
+                    audio, word_timings = (
+                        await tts_processor.synthesize_remaining_speech_with_timing(
+                            reply_text
+                        )
+                    )
 
                     if audio is not None and len(audio) > 0:
                         session_state["mode"] = "SPEAKING"
@@ -210,31 +280,43 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         wav_bytes = create_wav_from_pcm(audio_bytes, sample_rate=24000)
                         base64_audio = base64.b64encode(wav_bytes).decode("utf-8")
 
-                        await websocket.send_text(json.dumps({
-                            "audio": base64_audio, "word_timings": word_timings,
-                            "sample_rate": 24000, "method": "native_kokoro_timing",
-                            "state": "speaking"
-                        }))
+                        await websocket.send_text(
+                            json.dumps(
+                                {
+                                    "audio": base64_audio,
+                                    "word_timings": word_timings,
+                                    "sample_rate": 24000,
+                                    "method": "native_kokoro_timing",
+                                    "state": "speaking",
+                                }
+                            )
+                        )
                         await asyncio.sleep((len(audio) / 24000.0) + 0.5)
 
                     # ── STAY IN LOOP LOGIC ──
                     # If it was the initial greeting OR the AI asked a question, stay in FOLLOWUP
-                    if text == "WAKE_WORD_TRIGGERED" or _reply_expects_followup(reply_text):
+                    if text == "WAKE_WORD_TRIGGERED" or _reply_expects_followup(
+                        reply_text
+                    ):
                         session_state["mode"] = "FOLLOWUP"
                         await websocket.send_text(json.dumps({"state": "listening"}))
                         logger.info("[BRAIN] Playback complete. Staying in FOLLOWUP.")
                     else:
                         session_state["mode"] = "PASSIVE"
                         await websocket.send_text(json.dumps({"state": "passive"}))
-                    
+
                     text_queue.task_done()
-            except Exception as exc: logger.error(f"[BRAIN] Error: {exc}")
+            except Exception as exc:
+                logger.error(f"[BRAIN] Error: {exc}")
 
         listener_task = asyncio.create_task(listener())
         brain_task = asyncio.create_task(brain())
         keepalive_task = asyncio.create_task(send_keepalive())
 
-        await asyncio.wait([listener_task, brain_task, keepalive_task], return_when=asyncio.FIRST_COMPLETED)
+        await asyncio.wait(
+            [listener_task, brain_task, keepalive_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
     finally:
         await manager.cancel_current_tasks(client_id)
         manager.disconnect(client_id)

@@ -215,9 +215,12 @@ class GroqProcessor:
             return "I'm sorry, I didn't quite catch that. Could you say it again?"
 
     async def get_response(
-        self, client_id: str = "default_client", prompt: Optional[str] = None, company_info: Optional[dict] = None
+        self,
+        client_id: str = "default_client",
+        prompt: Optional[str] = None,
+        company_info: Optional[dict] = None,
     ) -> str:
-        
+
         # ─── FIX: Fallback if called with only 1 argument (e.g. get_response(prompt)) ───
         if prompt is None:
             prompt = client_id

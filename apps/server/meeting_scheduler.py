@@ -208,7 +208,9 @@ async def _finalize_meeting_booking(
         try:
             from services.calendar_service import send_calendar_invite
 
-            invite_dt = datetime.strptime(f"{meeting_date} {meeting_time}", "%Y-%m-%d %H:%M")
+            invite_dt = datetime.strptime(
+                f"{meeting_date} {meeting_time}", "%Y-%m-%d %H:%M"
+            )
             asyncio.create_task(
                 asyncio.to_thread(
                     send_calendar_invite,

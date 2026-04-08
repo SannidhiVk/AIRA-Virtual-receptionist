@@ -16,7 +16,7 @@ from models.groq_processor import GroqProcessor
 
 logger = logging.getLogger(__name__)
 
-AI_NAME = "Jarvis" # Changed from Sannika to Jarvis to match your request
+AI_NAME = "Jarvis"  # Changed from Sannika to Jarvis to match your request
 COMPANY_NAME = "Sharp Software Development India Pvt. Ltd."
 
 PRONOUNS = {
@@ -618,7 +618,11 @@ async def route_query(client_id: str, user_query: str) -> str:
         )
 
         # Allow general conversation ONLY if no useful info
-        if intent == "general_conversation" and not has_new_info and not state.get("is_delivery"):
+        if (
+            intent == "general_conversation"
+            and not has_new_info
+            and not state.get("is_delivery")
+        ):
             company_info = {
                 "company_name": COMPANY_NAME,
                 "visitor_name": state.get("visitor_name") or "Visitor",
@@ -645,6 +649,7 @@ async def route_query(client_id: str, user_query: str) -> str:
 
     return await llm.get_response(client_id, user_query, company_info=company_info)
 
+
 # ─────────────────────────────────────────────
 # CHECK-IN FLOW HELPERS
 # ─────────────────────────────────────────────
@@ -670,8 +675,6 @@ async def _advance_checkin(state: Dict[str, Any], user_query: str) -> str:
             {},
             user_query,
         )
-
-    
 
     if not has_name:
         state["conv_state"] = State.COLLECTING_NAME
