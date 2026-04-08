@@ -53,7 +53,9 @@ interface WebSocketContextType {
     callback: (status: 'connected' | 'disconnected' | 'connecting') => void
   ) => void;
   onServerState: (
-    callback: (state: 'passive' | 'listening' | 'processing' | 'speaking') => void
+    callback: (
+      state: 'passive' | 'listening' | 'processing' | 'speaking'
+    ) => void
   ) => void;
 }
 
@@ -107,7 +109,8 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
     ((status: 'connected' | 'disconnected' | 'connecting') => void) | null
   >(null);
   const serverStateCallbackRef = useRef<
-    ((state: 'passive' | 'listening' | 'processing' | 'speaking') => void) | null
+    | ((state: 'passive' | 'listening' | 'processing' | 'speaking') => void)
+    | null
   >(null);
 
   const connect = useCallback(async () => {
@@ -289,7 +292,9 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
 
   const onServerState = useCallback(
     (
-      callback: (state: 'passive' | 'listening' | 'processing' | 'speaking') => void
+      callback: (
+        state: 'passive' | 'listening' | 'processing' | 'speaking'
+      ) => void
     ) => {
       serverStateCallbackRef.current = callback;
     },

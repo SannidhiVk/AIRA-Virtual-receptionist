@@ -200,7 +200,8 @@ const TalkingHead: React.FC<TalkingHeadProps> = ({
 
         // Use native Web Audio API to decode the WAV file directly
         const arrayBuffer = base64ToArrayBuffer(base64Audio);
-        const audioBuffer = await audioContextRef.current!.decodeAudioData(arrayBuffer);
+        const audioBuffer =
+          await audioContextRef.current!.decodeAudioData(arrayBuffer);
 
         console.log('AudioBuffer created:', {
           duration: audioBuffer.duration,

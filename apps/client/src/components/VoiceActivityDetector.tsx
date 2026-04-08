@@ -25,7 +25,7 @@ const StatusOrb: React.FC<{ state: BackendState }> = ({ state }) => {
       outer: 'bg-gray-200',
       inner: 'bg-gray-400',
       ring: '',
-      label: "Say \"Hey Jarvis\"",
+      label: 'Say "Hey Jarvis"',
       labelClass: 'text-gray-500'
     },
     listening: {
@@ -54,8 +54,12 @@ const StatusOrb: React.FC<{ state: BackendState }> = ({ state }) => {
 
   return (
     <div className="flex flex-col items-center gap-4">
-      <div className={`flex h-36 w-36 items-center justify-center rounded-full transition-all duration-300 ${c.outer} ${c.ring}`}>
-        <div className={`flex h-20 w-20 items-center justify-center rounded-full transition-all duration-300 ${c.inner}`}>
+      <div
+        className={`flex h-36 w-36 items-center justify-center rounded-full transition-all duration-300 ${c.outer} ${c.ring}`}
+      >
+        <div
+          className={`flex h-20 w-20 items-center justify-center rounded-full transition-all duration-300 ${c.inner}`}
+        >
           <Mic size={28} className="text-white drop-shadow" />
         </div>
       </div>
@@ -90,7 +94,8 @@ const VoiceActivityDetector: React.FC = () => {
   const [micActive, setMicActive] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
 
-  const { sendAudioSegment, onServerState, isConnected } = useWebSocketContext();
+  const { sendAudioSegment, onServerState, isConnected } =
+    useWebSocketContext();
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
@@ -144,7 +149,10 @@ const VoiceActivityDetector: React.FC = () => {
         const samplesPerChunk = 320; // 20ms @ 16kHz
         let firstPacketSent = false;
 
-        const downsampleTo16k = (input: Float32Array, inSampleRate: number): Int16Array => {
+        const downsampleTo16k = (
+          input: Float32Array,
+          inSampleRate: number
+        ): Int16Array => {
           if (inSampleRate === targetSampleRate) {
             const out = new Int16Array(input.length);
             for (let i = 0; i < input.length; i++) {
@@ -164,13 +172,18 @@ const VoiceActivityDetector: React.FC = () => {
             const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
             let accum = 0;
             let count = 0;
-            for (let i = offsetBuffer; i < nextOffsetBuffer && i < input.length; i++) {
+            for (
+              let i = offsetBuffer;
+              i < nextOffsetBuffer && i < input.length;
+              i++
+            ) {
               accum += input[i];
               count += 1;
             }
             const sample = count > 0 ? accum / count : 0;
             const clamped = Math.max(-1, Math.min(1, sample));
-            out[offsetResult] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+            out[offsetResult] =
+              clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
             offsetResult += 1;
             offsetBuffer = nextOffsetBuffer;
           }
@@ -218,10 +231,12 @@ const VoiceActivityDetector: React.FC = () => {
   // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <Card className="w-full max-w-md mx-auto">
+    <Card className="mx-auto w-full max-w-md">
       <CardHeader className="text-center">
         <CardTitle>Receptionist AI</CardTitle>
-        <CardDescription>Continuous voice assistant — always listening</CardDescription>
+        <CardDescription>
+          Continuous voice assistant — always listening
+        </CardDescription>
       </CardHeader>
 
       <CardContent className="flex flex-col items-center gap-6">
@@ -230,16 +245,8 @@ const VoiceActivityDetector: React.FC = () => {
 
         {/* Indicator dots row */}
         <div className="flex gap-6">
-          <Dot
-            active={isConnected}
-            color="bg-green-500"
-            label="Connected"
-          />
-          <Dot
-            active={micActive}
-            color="bg-blue-500"
-            label="Mic Active"
-          />
+          <Dot active={isConnected} color="bg-green-500" label="Connected" />
+          <Dot active={micActive} color="bg-blue-500" label="Mic Active" />
           <Dot
             active={backendState === 'listening'}
             color="bg-blue-400"
