@@ -139,47 +139,71 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
             console.log(
               `Server confirmed connection. Client ID: ${data.client_id}`
             );
-          } else if (data.state) {
+          }
+
+          if (data.state) {
             serverStateCallbackRef.current?.(
               data.state as 'passive' | 'listening' | 'processing' | 'speaking'
             );
-          } else if (data.interrupt) {
+          }
+
+          if (data.interrupt) {
             console.log('Received interrupt signal');
             interruptCallbackRef.current?.();
-          } else if (data.audio) {
+          }
+
+          if (data.audio) {
             // Handle audio with native timing
             let timingData = null;
 
             if (data.word_timings) {
+              const usesMilliseconds = data.word_timings.some(
+                (wt) => wt.start_time > 20 || wt.end_time > 20
+              );
+              const toSeconds = (value: number) =>
+                usesMilliseconds ? value / 1000 : value;
+
               // Convert to TalkingHead format
               timingData = {
                 words: data.word_timings.map((wt) => wt.word),
-                word_times: data.word_timings.map((wt) => wt.start_time),
+                word_times: data.word_timings.map((wt) =>
+                  toSeconds(wt.start_time)
+                ),
                 word_durations: data.word_timings.map(
-                  (wt) => wt.end_time - wt.start_time
+                  (wt) => toSeconds(wt.end_time) - toSeconds(wt.start_time)
                 )
               };
               console.log('Converted timing data:', timingData);
             }
 
+            const normalizedAudio = data.audio.startsWith('data:')
+              ? data.audio.split(',')[1] || ''
+              : data.audio;
+
             console.log('Calling audioReceivedCallback with:', {
-              audioLength: data.audio.length,
+              audioLength: normalizedAudio.length,
               timingData,
               sampleRate: data.sample_rate || 24000,
               method: data.method || 'unknown'
             });
 
             audioReceivedCallbackRef.current?.(
-              data.audio,
+              normalizedAudio,
               timingData,
               data.sample_rate || 24000,
               data.method || 'unknown'
             );
-          } else if (data.audio_complete) {
+          }
+
+          if (data.audio_complete) {
             console.log('Audio processing complete');
-          } else if (data.error) {
+          }
+
+          if (data.error) {
             errorCallbackRef.current?.(data.error);
-          } else if (data.type === 'ping') {
+          }
+
+          if (data.type === 'ping') {
             // Keepalive ping - no action needed
           }
         } catch (e) {

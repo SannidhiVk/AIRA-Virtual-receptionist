@@ -177,6 +177,82 @@ def _format_slots_for_speech(slots: List[str]) -> str:
     )
 
 
+async def _finalize_meeting_booking(
+    client_id: str,
+    state: Dict[str, Any],
+) -> str:
+    emp_name = state.get("employee_name") or state.get("employee_query")
+    meeting_date = state.get("meeting_date")
+    meeting_time = state.get("meeting_time")
+    purpose = state.get("purpose") or ""
+    organizer_name = state.get("organizer_name") or "Visitor"
+    organizer_type = state.get("organizer_type") or "visitor"
+
+    if not (emp_name and meeting_date and meeting_time and purpose):
+        logger.warning("Missing scheduling fields at finalize for %s", client_id)
+        return "I couldn't confirm everything yet. Please tell me the missing meeting details."
+
+    meeting_id = schedule_meeting(
+        organizer_name=organizer_name,
+        organizer_type=organizer_type,
+        employee_name=emp_name,
+        meeting_date=meeting_date,
+        meeting_time=meeting_time,
+        purpose=purpose,
+    )
+    if not meeting_id:
+        return "Sorry - I had trouble saving that meeting. Could you try again?"
+
+    # Non-blocking Google Calendar invite
+    if state.get("employee_email"):
+        try:
+            from services.calendar_service import send_calendar_invite
+
+            invite_dt = datetime.strptime(f"{meeting_date} {meeting_time}", "%Y-%m-%d %H:%M")
+            asyncio.create_task(
+                asyncio.to_thread(
+                    send_calendar_invite,
+                    organizer_name,  # visitor_name
+                    state["employee_email"],  # employee_email
+                    invite_dt,
+                )
+            )
+        except Exception as e:
+            logger.error("Invite scheduling failed: %s", e)
+
+    # Non-blocking internal notification hook
+    try:
+        from services.notification_service import send_meeting_notification
+
+        asyncio.create_task(
+            send_meeting_notification(
+                employee_name=state.get("employee_name") or emp_name,
+                employee_email=state.get("employee_email"),
+                organizer_name=organizer_name,
+                meeting_date=meeting_date,
+                meeting_time=meeting_time,
+                purpose=purpose,
+            )
+        )
+    except Exception as e:
+        logger.error("Notification scheduling failed: %s", e)
+
+    friendly_date = _format_date_for_speech(meeting_date)
+    friendly_time = _format_time_for_speech(meeting_time)
+    cabin = state.get("employee_cabin")
+    emp_display = state.get("employee_name") or emp_name
+
+    if cabin:
+        return (
+            f"Done! I've scheduled your meeting with {emp_display} on {friendly_date} at {friendly_time}. "
+            f"I've also notified them. Please head to cabin {cabin}."
+        )
+    return (
+        f"Done! I've scheduled your meeting with {emp_display} on {friendly_date} at {friendly_time}. "
+        "I've also sent the calendar invite and notified them."
+    )
+
+
 async def _extract_meeting_details(text: str) -> Dict[str, Optional[str]]:
     """
     Meeting-specific extraction with deterministic temperature=0.
@@ -276,72 +352,9 @@ async def handle_meeting_request(
     # 2) CONFIRM state
     if meeting_state == "CONFIRM":
         if any(w in text_lower for w in CONFIRM_YES):
-            emp_name = state.get("employee_name") or state.get("employee_query")
-            meeting_date = state.get("meeting_date")
-            meeting_time = state.get("meeting_time")
-            purpose = state.get("purpose") or ""
-            organizer_name = state.get("organizer_name") or "Visitor"
-            organizer_type = state.get("organizer_type") or "visitor"
-
-            if not (emp_name and meeting_date and meeting_time):
-                logger.warning("Missing scheduling fields at CONFIRM for %s", client_id)
-                _clear_client_state(client_id)
-                return (
-                    True,
-                    "I couldn't confirm everything. What date and time should we use?",
-                )
-
-            meeting_id = schedule_meeting(
-                organizer_name=organizer_name,
-                organizer_type=organizer_type,
-                employee_name=emp_name,
-                meeting_date=meeting_date,
-                meeting_time=meeting_time,
-                purpose=purpose,
-            )
-
-            if not meeting_id:
-                _clear_client_state(client_id)
-                return (
-                    True,
-                    "Sorry - I had trouble saving that meeting. Could you try again?",
-                )
-
-            # Non-blocking Google Calendar invite
-            if state.get("employee_email"):
-                try:
-                    from services.calendar_service import send_calendar_invite
-
-                    invite_dt = datetime.strptime(
-                        f"{meeting_date} {meeting_time}", "%Y-%m-%d %H:%M"
-                    )
-
-                    asyncio.create_task(
-                        asyncio.to_thread(
-                            send_calendar_invite,
-                            organizer_name,  # visitor_name
-                            state["employee_email"],  # employee_email
-                            invite_dt,  # datetime
-                        )
-                    )
-                except Exception as e:
-                    logger.error("Invite scheduling failed: %s", e)
-
-            friendly_date = _format_date_for_speech(meeting_date)
-            friendly_time = _format_time_for_speech(meeting_time)
-            cabin = state.get("employee_cabin")
-            emp_display = state.get("employee_name") or emp_name
-
+            reply = await _finalize_meeting_booking(client_id, state)
             _clear_client_state(client_id)
-            if cabin:
-                return (
-                    True,
-                    f"Done! I've scheduled your meeting with {emp_display} on {friendly_date} at {friendly_time}. Please head to cabin {cabin}.",
-                )
-            return (
-                True,
-                f"Done! I've scheduled your meeting with {emp_display} on {friendly_date} at {friendly_time}.",
-            )
+            return (True, reply)
 
         if any(w in text_lower for w in CONFIRM_NO):
             _clear_client_state(client_id)
@@ -353,20 +366,10 @@ async def handle_meeting_request(
     if meeting_state == "GET_PURPOSE":
         # Accept verbatim purpose; keeps it natural for speech.
         state["purpose"] = text
-        state["meeting_state"] = "CONFIRM"
-
-        meeting_date = state.get("meeting_date")
-        meeting_time = state.get("meeting_time")
-        emp_display = (
-            state.get("employee_name") or state.get("employee_query") or "the person"
-        )
-
-        friendly_date = _format_date_for_speech(meeting_date) if meeting_date else ""
-        friendly_time = _format_time_for_speech(meeting_time) if meeting_time else ""
-        return (
-            True,
-            f"Just to confirm - meeting with {emp_display} on {friendly_date} at {friendly_time} for {text}. Shall I confirm this?",
-        )
+        # Auto-finalize once all required slots are present.
+        reply = await _finalize_meeting_booking(client_id, state)
+        _clear_client_state(client_id)
+        return (True, reply)
 
     # 4) IN_PROGRESS state: extract and fill missing slots.
     if meeting_state == "IN_PROGRESS":
@@ -476,14 +479,10 @@ async def handle_meeting_request(
             state["meeting_state"] = "GET_PURPOSE"
             return True, f"Great. What's the purpose of the meeting with {emp.name}?"
 
-        # Ready to confirm
-        state["meeting_state"] = "CONFIRM"
-        friendly_date = _format_date_for_speech(meeting_date)
-        friendly_time = _format_time_for_speech(meeting_time)
-        return (
-            True,
-            f"Just to confirm - meeting with {emp.name} on {friendly_date} at {friendly_time} for {state['purpose']}. Shall I confirm this?",
-        )
+        # All required entities are now collected; execute scheduling immediately.
+        reply = await _finalize_meeting_booking(client_id, state)
+        _clear_client_state(client_id)
+        return (True, reply)
 
     # Should never happen, but keep it safe.
     return False, ""

@@ -16,8 +16,8 @@ from models.groq_processor import GroqProcessor
 
 logger = logging.getLogger(__name__)
 
-COMPANY_NAME = "Sharp Software"
-AI_NAME = "Sannika"
+AI_NAME = "Jarvis" # Changed from Sannika to Jarvis to match your request
+COMPANY_NAME = "Sharp Software Development India Pvt. Ltd."
 
 PRONOUNS = {
     "him",
@@ -473,7 +473,6 @@ async def route_query(client_id: str, user_query: str) -> str:
     _merge_checkin_entities(state, entities)
 
     # ── SCHEDULING DETECTION ─────────────────────────────────────────────
-    # If the user explicitly asks to schedule/book an appointment, activate the scheduling flow.
     wants_scheduling = intent == "schedule_meeting" or (
         any(w in q_lower for w in ["schedule", "book", "appointment"])
         and not any(w in q_lower for w in ["now", "arrived", "here for", "where is"])
@@ -484,7 +483,7 @@ async def route_query(client_id: str, user_query: str) -> str:
     if state["scheduling_active"]:
         return await _handle_scheduling(client_id, user_query, state, entities)
 
-    # ── SMART HOST FALLBACK (If they agree to contact HR/Admin) ─────────
+    # ── SMART HOST FALLBACK ──────────────────────────────────────────────
     if state["conv_state"] == State.COLLECTING_HOST:
         if intent == "confirm" or any(
             w in q_lower
@@ -502,7 +501,7 @@ async def route_query(client_id: str, user_query: str) -> str:
             if not state["meeting_with_raw"]:
                 state["meeting_with_raw"] = "HR / Administration"
 
-    # ── FACILITY & MAINTENANCE REQUESTS ──────────────────────────────────
+    # ── FACILITY REQUESTS ────────────────────────────────────────────────
     is_facility = intent == "facility_request" or any(
         w in q_lower
         for w in [
@@ -526,7 +525,7 @@ async def route_query(client_id: str, user_query: str) -> str:
             user_query,
         )
 
-    # ── SMART DELIVERY DETECTION ─────────────────────────────────────────
+    # ── DELIVERY DETECTION ───────────────────────────────────────────────
     purpose_str = (state.get("purpose") or "").lower()
     name_str = (state.get("visitor_name") or "").lower()
     if (
@@ -542,7 +541,7 @@ async def route_query(client_id: str, user_query: str) -> str:
         if not state.get("purpose"):
             state["purpose"] = "Drop off delivery"
 
-    # ── EMPLOYEE / DEPARTMENT LOOKUP ──────────────────────────────────────
+    # ── EMPLOYEE LOOKUP ─────────────────────────────────────────────────
     is_lookup = intent == "employee_lookup" or any(
         k in q_lower
         for k in ["who is", "where is", "which cabin", "which floor", "what floor"]
@@ -576,22 +575,7 @@ async def route_query(client_id: str, user_query: str) -> str:
             user_query,
         )
 
-    # ── GENERAL CONVERSATION (PRE-CHECK-IN) ──────────────────────────────
-    if intent == "general_conversation" and state["conv_state"] != State.COMPLETED:
-        has_new_info = any(
-            _clean_entity(entities.get(k))
-            for k in ["visitor_name", "employee_name", "role", "purpose"]
-        )
-        if not has_new_info and not state.get("is_delivery"):
-            company_info = {
-                "company_name": COMPANY_NAME,
-                "visitor_name": state.get("visitor_name") or "Visitor",
-            }
-            return await llm.get_response(
-                client_id, user_query, company_info=company_info
-            )
-
-    # ── EMPLOYEE ARRIVAL DETECTION ────────────────────────────────────────
+    # ── EMPLOYEE ARRIVAL DETECTION ──────────────────────────────────────
     if (
         intent == "check_in"
         and state["conv_state"] in (State.INIT, State.COLLECTING_NAME)
@@ -626,11 +610,27 @@ async def route_query(client_id: str, user_query: str) -> str:
                     user_query,
                 )
 
-    # ── CHECK-IN FLOW ─────────────────────────────────────────────────────
+    # ── ✅ PRIORITY CHECK-IN FLOW (FIXED ORDER) ──────────────────────────
     if state["conv_state"] != State.COMPLETED:
+        has_new_info = any(
+            _clean_entity(entities.get(k))
+            for k in ["visitor_name", "employee_name", "role", "purpose"]
+        )
+
+        # Allow general conversation ONLY if no useful info
+        if intent == "general_conversation" and not has_new_info and not state.get("is_delivery"):
+            company_info = {
+                "company_name": COMPANY_NAME,
+                "visitor_name": state.get("visitor_name") or "Visitor",
+            }
+            return await llm.get_response(
+                client_id, user_query, company_info=company_info
+            )
+
+        # Otherwise force check-in progression
         return await _advance_checkin(state, user_query)
 
-    # ── POST CHECK-IN FALLBACK ────────────────────────────────────────────
+    # ── POST CHECK-IN ───────────────────────────────────────────────────
     emp = _lookup_employee(
         state.get("meeting_with_resolved") or state.get("meeting_with_raw")
     )
@@ -642,8 +642,8 @@ async def route_query(client_id: str, user_query: str) -> str:
         company_info["dynamic_employee"] = (
             f"Name: {emp.name} | Role: {emp.role} | Floor: {emp.floor} | Cabin: {emp.cabin_number}"
         )
-    return await llm.get_response(client_id, user_query, company_info=company_info)
 
+    return await llm.get_response(client_id, user_query, company_info=company_info)
 
 # ─────────────────────────────────────────────
 # CHECK-IN FLOW HELPERS
@@ -671,10 +671,13 @@ async def _advance_checkin(state: Dict[str, Any], user_query: str) -> str:
             user_query,
         )
 
+    
+
     if not has_name:
         state["conv_state"] = State.COLLECTING_NAME
+        # Change this to be more natural since the "Welcome" was already said
         return await _llm_reply(
-            f"Warmly welcome the visitor. Introduce yourself as {AI_NAME} and ask for their name.",
+            f"Politely ask the visitor for their name so you can begin the check-in process.",
             {},
             user_query,
         )
@@ -691,8 +694,8 @@ async def _advance_checkin(state: Dict[str, Any], user_query: str) -> str:
         state["conv_state"] = State.COLLECTING_PURPOSE
         emp_display = state["meeting_with_resolved"] or state["meeting_with_raw"]
         return await _llm_reply(
-            f"Politely ask the visitor the purpose of their visit with {emp_display}.",
-            {"visitor_name": state["visitor_name"], "employee_name": emp_display},
+            f"Acknowledge that they are a new team member, then politely ask the purpose of their visit today (e.g., orientation, meeting HR, or starting their shift).",
+            {"visitor_name": state["visitor_name"]},
             user_query,
         )
 
