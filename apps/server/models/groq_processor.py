@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -26,7 +27,10 @@ IDENTITY & TONE
 • Your name is {AI_NAME}. Introduce yourself naturally, but don't over-repeat it.
 • Be highly conversational, smart, human-like, and polite. Act exactly like a premium concierge or an advanced AI assistant (like Alexa).
 • If a visitor asks a question, answer it directly and intelligently. Do not force them into rigid scripts.
-• You are allowed to use natural conversational connectors ("Sure thing," "Got it," "I completely understand," "Welcome!").
+• Vary your conversational openers naturally. Never start two consecutive replies 
+   the same way. Examples: "Of course!", "Absolutely!", "Happy to help!", 
+   "Sure thing!", "No problem at all!", "Let me take care of that for you." 
+   Avoid repeating "Got it" more than once per conversation.
 • Keep replies concise but fluid (usually 1-3 sentences).
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -51,6 +55,7 @@ ABSOLUTE PROHIBITIONS
 # EXTRACTION PROMPT (PURE NLU ENGINE)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 EXTRACT_SYSTEM = """You are an information extraction engine for a corporate receptionist system.
 Given a visitor's spoken input, extract structured data and return ONLY a valid JSON object.
 No markdown. No explanation. No preamble. Just the JSON.
@@ -64,47 +69,35 @@ Output format:
     "role": <string|null>,
     "date": <string|null>,
     "time": <string|null>,
-    "purpose": <string|null>
+    "purpose": <string|null>,
+    "visitor_type": <string|null>
   }
 }
 
 INTENT CLASSIFICATION RULES:
-You MUST classify the input into EXACTLY ONE of these intents:
-- "check_in"             : Speaker has arrived at the office NOW to see someone, attend an interview, or drop off a package.
-- "employee_arrival"     : Speaker explicitly states they are an employee who works here and is arriving for the day.
-- "schedule_meeting"     : Speaker wants to BOOK, SCHEDULE, or SET UP a FUTURE appointment. (Do NOT use this for someone arriving for an existing meeting).
-- "employee_lookup"      : Speaker is asking where a person, cabin, or department is located.
-- "facility_request"     : Speaker is complaining or asking about the environment (e.g., AC, freezing, hot, lights, wifi, cleaning, spills).
-- "general_conversation" : Greetings, asking about office hours, directions to the washroom, or small talk.
-- "confirm"              : Speaker is saying yes, go ahead, proceed, please do, or agreeing to a suggestion.
-- "cancel"               : Speaker is saying no, cancel, never mind, stop, or declining a suggestion.
+- "check_in" : Arriving at the office NOW to see someone, attend an interview, or drop off a package.
+- "employee_arrival" : An employee who works here arriving for the day.
+- "schedule_meeting" : Wants to BOOK, SCHEDULE, or SET UP a FUTURE appointment.
+- "employee_lookup" : Asking where a person or department is.
+- "facility_request" : Complaining or asking about the environment (AC, lights, cleaning).
+- "general_conversation" : Greetings, small talk.
+- "confirm" : Saying yes, go ahead.
+- "cancel" : Saying no, cancel.
 
-ENTITY EXTRACTION RULES:
-- visitor_name: The speaking person's own name. (If they say "I have a delivery" or "I am a courier", extract "Delivery").
-- employee_name: The specific named person the visitor wants to see, meet, or drop a delivery for.
-- role: A job title or department (e.g., "HR Manager", "Sales", "HR").
-- date: A date or relative day ("today", "tomorrow"). Null if not mentioned.
-- time: A specific clock time ("5:00 PM", "14:00"). Null if vague or not mentioned.
-- purpose: The reason for the visit (e.g., "job interview", "sales demo", "delivery", "drop off package").
+VISITOR TYPE CATEGORIES (MUST BE ONE OF THESE IF APPLICABLE):
+- "Contractor/Vendor" : Maintenance, electrician, plumber, service staff.
+- "Interviewee" : Job candidates, HR interviews.
+- "Client" : Clients, demos, customer meetings.
+- "Delivery" : Amazon, Flipkart, packages, couriers.
+- "Food Delivery" : Swiggy, Zomato.
+- "Visitor/Guest" : General personal/business meetings.
 
-FEW-SHOT EXAMPLES (PAY CLOSE ATTENTION):
-Input: "It is freezing in here, can you fix the AC?"
-Output: {"intent": "facility_request", "entities": {"visitor_name": null, "employee_name": null, "role": null, "date": null, "time": null, "purpose": null}}
+FEW-SHOT EXAMPLES:
+Input: "I am here for an HR interview."
+Output: {"intent": "check_in", "entities": {"visitor_name": null, "employee_name": null, "role": null, "date": null, "time": null, "purpose": "HR interview", "visitor_type": "Interviewee"}}
 
-Input: "Hi, I am Vivek and I am an employee of this company."
-Output: {"intent": "employee_arrival", "entities": {"visitor_name": "Vivek", "employee_name": null, "role": null, "date": null, "time": null, "purpose": null}}
-
-Input: "I need to schedule an appointment with the HR manager for tomorrow."
-Output: {"intent": "schedule_meeting", "entities": {"visitor_name": null, "employee_name": null, "role": "HR manager", "date": "tomorrow", "time": null, "purpose": null}}
-
-Input: "I have a package for Sanjay."
-Output: {"intent": "check_in", "entities": {"visitor_name": "Delivery", "employee_name": "Sanjay", "role": null, "date": null, "time": null, "purpose": "delivery"}}
-
-Input: "I am here for my 10 AM technical interview."
-Output: {"intent": "check_in", "entities": {"visitor_name": null, "employee_name": null, "role": null, "date": null, "time": "10:00 AM", "purpose": "technical interview"}}
-
-Input: "Where is the engineering department?"
-Output: {"intent": "employee_lookup", "entities": {"visitor_name": null, "employee_name": null, "role": "engineering department", "date": null, "time": null, "purpose": null}}
+Input: "I have a package from Amazon for Sanjay."
+Output: {"intent": "check_in", "entities": {"visitor_name": "Amazon", "employee_name": "Sanjay", "role": null, "date": null, "time": null, "purpose": "delivery", "visitor_type": "Delivery"}}
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -115,7 +108,7 @@ def _load_dotenv_from_any_location() -> None:
     try:
         from dotenv import load_dotenv as _load
         here = Path(__file__).resolve()
-        candidates =[here.parent / ".env", here.parent.parent / ".env", here.parent.parent.parent / ".env"]
+        candidates = [here.parent / ".env", here.parent.parent / ".env", here.parent.parent.parent / ".env"]
         for path in candidates:
             if path.exists():
                 _load(dotenv_path=str(path), override=False)
@@ -137,7 +130,11 @@ def _read_api_key() -> str:
     return ""
 
 def _build_system_message(company_info: Optional[dict] = None) -> str:
-    system = BASE_SYSTEM_PROMPT
+    current_time = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
+    
+    # Inject current date and time to prevent hallucinations
+    system = BASE_SYSTEM_PROMPT + f"\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCURRENT DATE & TIME\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n{current_time}"
+    
     if company_info:
         system += "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCOMPANY CONTEXT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         if company_info.get("company_name"): system += f"\nCompany: {company_info['company_name']}"
@@ -180,18 +177,34 @@ class GroqProcessor:
         logger.info("GroqProcessor initialized with model '%s'", self.model_name)
 
     def reset_history(self, client_id: str):
-        self.client_history[client_id] =[]
+        self.client_history[client_id] = []
         logger.info(f"GroqProcessor conversation history reset for {client_id}.")
 
-    async def get_raw_response(self, prompt: str) -> str:
+    async def get_raw_response(self, prompt: str, client_id: Optional[str] = None) -> str:
         try:
+            if client_id and client_id in self.client_history:
+            # Use history for context but don't persist this structured prompt
+                context_messages = self.client_history[client_id][-6:]  # last 3 turns
+            else:
+                context_messages = []
+        
+            messages = context_messages + [{"role": "user", "content": prompt}]
+        
             response = await self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=100,
-                temperature=0.6,
+            model=self.model_name,
+            messages=messages,
+            max_tokens=120,  # also increased — 100 cuts off responses
+            temperature=0.6,
             )
-            return _clean_reply(response.choices[0].message.content)
+            reply = _clean_reply(response.choices[0].message.content)
+        
+        # Save to history so next turn has context
+            if client_id:
+                if client_id not in self.client_history:
+                    self.client_history[client_id] = []
+                self.client_history[client_id].append({"role": "assistant", "content": reply})
+        
+            return reply
         except Exception as e:
             logger.error("get_raw_response error: %s", e)
             return "I'm sorry, I didn't quite catch that. Could you say it again?"
@@ -200,7 +213,7 @@ class GroqProcessor:
         if not prompt: return ""
         
         if client_id not in self.client_history:
-            self.client_history[client_id] =[]
+            self.client_history[client_id] = []
 
         if re.search(r"\b(bye|goodbye|thank you|thanks)\b", prompt.strip().lower()):
             self.reset_history(client_id)
@@ -209,7 +222,7 @@ class GroqProcessor:
             self.client_history[client_id] = self.client_history[client_id][-12:]
         
         self.client_history[client_id].append({"role": "user", "content": prompt})
-        messages =[{"role": "system", "content": _build_system_message(company_info)}] + self.client_history[client_id]
+        messages = [{"role": "system", "content": _build_system_message(company_info)}] + self.client_history[client_id]
 
         try:
             response = await self.client.chat.completions.create(

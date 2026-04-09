@@ -1,200 +1,154 @@
 """
 seed_data.py
 ------------
-Populates the SQLite database with initial staff, visitor, and meeting data.
-Called from the server lifespan hook at startup.
+Seeds the normalized database with initial mock data, including 12 employees.
 """
 
 from datetime import datetime
+from receptionist.database import SessionLocal, init_db
+from receptionist.models import Employee, Settings
 
-from .database import SessionLocal
-from .models import Employee, Meeting, Visitor
+def seed_database():
+    init_db()
+    session = SessionLocal()
 
-
-def seed_database() -> None:
-    """
-    Seed the receptionist SQLite DB using SQLAlchemy models.
-    No-op if employee records already exist (prevents reseeding on restart).
-    """
-    db = SessionLocal()
     try:
-        if db.query(Employee).first():
-            return  # Already seeded
+        # Check if already seeded
+        if session.query(Employee).first():
+            print("Database already seeded.")
+            return
 
-        # ── Staff ──────────────────────────────────────────────────────────
+        print("Seeding initial company settings...")
+        settings = [
+            Settings(key="company_name", value="Sharp Software Development India Private Limited"),
+            Settings(key="company_address", value="123 Innovation Drive, Tech Park"),
+            Settings(key="company_phone", value="+91-80-5555-0199"),
+            Settings(key="company_email", value="contact@sharpsoftware.in"),
+            Settings(key="company_website", value="www.sharpsoftware.in"),
+        ]
+        session.add_all(settings)
+
+        print("Seeding 12 employees...")
         employees = [
             Employee(
-                name="Arjun",
+                name="Priya",
+                email="krutikakanchani847+priya@gmail.com",
                 department="HR",
                 role="HR Manager",
-                cabin_number="201",
-                floor="2",
-                extension="201",
-                email="krutikakanchani847@gmail.com",
-                is_public=1,
-            ),
-            Employee(
-                name="Priya",
-                department="HR",
-                role="HR Executive",
-                cabin_number="202",
-                floor="2",
-                extension="202",
-                email="sannidhivk2004@gmail.com",
-                is_public=1,
-            ),
-            Employee(
-                name="Meera",
-                department="Finance",
-                role="Financial Analyst",
-                cabin_number="305",
-                floor="3",
-                extension="305",
-                email="krutikakanchani847@gmail.com",
-                is_public=1,
-            ),
-            Employee(
-                name="Rohit",
-                department="Engineering",
-                role="Software Engineer",
-                cabin_number="110",
-                floor="1",
-                extension="110",
-                email="sannidhivk2004@gmail.com",
-                is_public=1,
-            ),
-            Employee(
-                name="Neha",
-                department="Engineering",
-                role="Backend Engineer",
-                cabin_number="112",
-                floor="1",
-                extension="112",
-                email="krutikakanchani847@gmail.com",
-                is_public=1,
-            ),
-            Employee(
-                name="Vivek",
-                department="Engineering",
-                role="DevOps Engineer",
-                cabin_number="115",
-                floor="1",
-                extension="115",
-                email="sannidhivk2004@gmail.com",
-                is_public=1,
-            ),
-            Employee(
-                name="Kavya",
-                department="Marketing",
-                role="Marketing Manager",
-                cabin_number="402",
-                floor="4",
-                extension="402",
-                email="krutikakanchani847@gmail.com",
-                is_public=1,
-            ),
-            Employee(
-                name="Sanjay",
-                department="Admin",
-                role="Office Administrator",
-                cabin_number="101",
-                floor="1",
+                location="Floor 2, Room 201",
                 extension="101",
-                email="sannidhivk2004@gmail.com",
-                is_public=1,
+                is_public=True
             ),
             Employee(
-                name="Aman",
+                name="Arjun",
+                email="sannidhivk2004+arjun@gmail.com",
+                department="Engineering",
+                role="Lead Engineer",
+                location="Floor 3, Desk 35",
+                extension="102",
+                is_public=True
+            ),
+            Employee(
+                name="Suresh",
+                email="krutikakanchani847+suresh@gmail.com",
+                department="Management",
+                role="CEO",
+                location="Floor 5, Executive Suite",
+                extension="100",
+                is_public=True
+            ),
+            Employee(
+                name="Jack",
+                email="sannidhivk2004+sannidhi@gmail.com",
                 department="Sales",
-                role="Sales Manager",
-                cabin_number="501",
-                floor="5",
-                extension="501",
-                email="krutikakanchani847@gmail.com",
-                is_public=1,
+                role="Sales Director",
+                location="Floor 1, Room 105",
+                extension="104",
+                is_public=True
             ),
             Employee(
-                name="Ritu",
-                department="Support",
-                role="Customer Support Executive",
-                cabin_number="120",
-                floor="1",
+                name="john",
+                email="krutikakanchani847+lavanya@gmail.com",
+                department="IT Support",
+                role="IT Administrator",
+                location="Floor 1, Tech Bar",
+                extension="110",
+                is_public=True
+            ),
+            Employee(
+                name="Virat",
+                email="krutikaak07+sunil@gmail.com",
+                department="Design",
+                role="UX/UI Designer",
+                location="Floor 2, Creative Studio",
+                extension="115",
+                is_public=True
+            ),
+            Employee(
+                name="Ravi",
+                email="sannidhivk2004+prajwal@gmail.com",
+                department="Finance",
+                role="Chief Financial Officer",
+                location="Floor 5, Room 502",
                 extension="120",
-                email="sannidhivk2004@gmail.com",
-                is_public=1,
+                is_public=True
             ),
+            Employee(
+                name="Rahul",
+                email="sannidhivk2004+rahul@gmail.com",
+                department="Marketing",
+                role="Marketing Coordinator",
+                location="Floor 2, Desk 12",
+                extension="125",
+                is_public=True
+            ),
+            Employee(
+                name="Ramesh",
+                email="sannidhivk2004+pratham@gmail.com",
+                department="Engineering",
+                role="Data Scientist",
+                location="Floor 3, Desk 42",
+                extension="130",
+                is_public=True
+            ),
+            Employee(
+                name="lucy",
+                email="krutikakanchani847+shivraj@gmail.com",
+                department="Legal",
+                role="Legal Counsel",
+                location="Floor 4, Room 410",
+                extension="140",
+                is_public=True
+            ),
+            Employee(
+                name="Cookie",
+                email="krutikakanchani847+vivek@gmail.com",
+                department="Finance",
+                role="Accountant",
+                location="Floor 4, Desk 8",
+                extension="145",
+                is_public=True
+            ),
+            Employee(
+                name="Jim",
+                email="krutikaak07+veeresh@gmail.com",
+                department="Operations",
+                role="Operations Manager",
+                location="Floor 1, Room 112",
+                extension="150",
+                is_public=True
+            )
         ]
+        session.add_all(employees)
+        session.commit()
+        
+        print("Database seeded successfully with 12 employees!")
 
-        # ── Visitors ───────────────────────────────────────────────────────
-        now_iso = datetime.utcnow().isoformat()
-        visitors = [
-            Visitor(
-                name="Sam",
-                status="New Intern",
-                meeting_with="Arjun",
-                purpose="Onboarding",
-                check_in_time=now_iso,
-                checkin_time=datetime.utcnow(),
-            ),
-            Visitor(
-                name="John",
-                status="Guest",
-                meeting_with="Kavya",
-                purpose="Partnership discussion",
-                check_in_time=now_iso,
-                checkin_time=datetime.utcnow(),
-            ),
-            Visitor(
-                name="Alice",
-                status="Candidate",
-                meeting_with="Priya",
-                purpose="Job interview",
-                check_in_time=now_iso,
-                checkin_time=datetime.utcnow(),
-            ),
-        ]
-
-        # ── Sample meetings ────────────────────────────────────────────────
-        today = datetime.now().date().isoformat()
-        meetings = [
-            Meeting(
-                organizer_name="Rahul",
-                organizer_type="visitor",
-                visitor_name="Rahul",
-                employee_name="Arjun",
-                meeting_date=today,
-                meeting_time="10:00",
-                scheduled_time=datetime.now(),
-                status="scheduled",
-                created_at=now_iso,
-            ),
-            Meeting(
-                organizer_name="Anita",
-                organizer_type="visitor",
-                visitor_name="Anita",
-                employee_name="Meera",
-                meeting_date=today,
-                meeting_time="11:00",
-                scheduled_time=datetime.now(),
-                status="completed",
-                created_at=now_iso,
-            ),
-            Meeting(
-                organizer_name="Kiran",
-                organizer_type="visitor",
-                visitor_name="Kiran",
-                employee_name="Rohit",
-                meeting_date=today,
-                meeting_time="14:00",
-                scheduled_time=datetime.now(),
-                status="scheduled",
-                created_at=now_iso,
-            ),
-        ]
-
-        db.add_all(employees)
-        db.add_all(visitors)
-        db.add_all(meetings)
-        db.commit()
+    except Exception as e:
+        session.rollback()
+        print(f"Error seeding database: {e}")
     finally:
-        db.close()
+        session.close()
+
+if __name__ == "__main__":
+    seed_database()

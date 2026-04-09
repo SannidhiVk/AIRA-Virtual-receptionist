@@ -1,110 +1,94 @@
-from datetime import datetime
+"""
+models.py
+---------
+Normalized SQLAlchemy models for the receptionist application.
+"""
 
-from sqlalchemy import Column, Integer, String, DateTime, Text, Float, ForeignKey
+from datetime import datetime
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
 
 class Employee(Base):
-    """Office staff directory."""
-
+    """Office staff directory (Entity)."""
     __tablename__ = "employees"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False)
+    email = Column(String, unique=True, nullable=False)
     department = Column(String)
     role = Column(String)
-    email = Column(String)
-    # cabin_number kept for backward-compat; maps to floor in new schema
-    cabin_number = Column(String)
-    floor = Column(String)
+    # Merged 'cabin_number' and 'floor' into a single workspace/location field
+    location = Column(String) 
     extension = Column(String)
     reports_to = Column(Integer, ForeignKey("employees.id"), nullable=True)
-    is_public = Column(Integer, default=1)  # 1 = visible in directory
+    is_public = Column(Boolean, default=True)
     photo_path = Column(String)
 
-    # self-referential relationship — remote_side=[id] tells SQLAlchemy that
-    # 'id' is the "one" (parent) side, so 'reports_to' is the FK (many) side.
-    subordinates = relationship(
-        "Employee",
-        backref="manager",
-        foreign_keys=[reports_to],
-        remote_side=[id],  # ← fix: marks 'id' as the parent/remote side
-    )
+    # Relationships
+    manager = relationship("Employee", remote_side=[id], backref="subordinates")
+    meetings = relationship("Meeting", back_populates="host_employee")
+    logs = relationship("ReceptionLog", back_populates="employee")
 
 
 class Visitor(Base):
-    """Every external person who interacts with reception."""
-
+    """External person profile (Entity). No visit-specific data here."""
     __tablename__ = "visitors"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False)
-    # legacy status field (e.g. "New Intern", "Candidate", "Guest")
-    status = Column(String)
-    # richer fields from database1
-    meeting_with = Column(String)
-    purpose = Column(String)
-    badge_id = Column(String)
-    check_in_time = Column(String)  # ISO string — keeps parity with db1
-    check_out_time = Column(String)
+    email = Column(String, unique=True, nullable=True)
+    phone = Column(String, nullable=True)
     id_photo_path = Column(String)
-    # legacy DateTime column used by seed_data
-    checkin_time = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    meetings = relationship("Meeting", back_populates="visitor")
+    logs = relationship("ReceptionLog", back_populates="visitor")
 
 
 class Meeting(Base):
-    """Scheduled meetings between visitors/employees and staff."""
-
+    """Scheduled meetings (Event). Links Employee and Visitor via IDs."""
     __tablename__ = "meetings"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    # legacy fields (used by old database.py)
-    visitor_name = Column(String)
-    scheduled_time = Column(DateTime)
-    # richer fields from database1
-    organizer_name = Column(String)
-    organizer_type = Column(String)
-    employee_name = Column(String, nullable=False)
-    employee_email = Column(String)
-    meeting_date = Column(String)  # YYYY-MM-DD
-    meeting_time = Column(String)  # HH:MM
+    host_employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False)
+    visitor_id = Column(Integer, ForeignKey("visitors.id"), nullable=True)
+    
+    scheduled_start = Column(DateTime, nullable=False)
+    scheduled_end = Column(DateTime, nullable=True)
     purpose = Column(String)
-    status = Column(String, default="scheduled")
-    created_at = Column(String)
+    status = Column(String, default="scheduled") # e.g., 'scheduled', 'cancelled', 'completed'
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    host_employee = relationship("Employee", back_populates="meetings")
+    visitor = relationship("Visitor", back_populates="meetings")
 
 
 class ReceptionLog(Base):
-    """Unified log of every person who passed through reception."""
-
-    __tablename__ = "reception_log"
+    """Unified log for physical check-ins/check-outs at the front desk (Event)."""
+    __tablename__ = "reception_logs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    person_name = Column(String, nullable=False)
-    # VISITOR | EMPLOYEE | DELIVERY | JOB_SEEKER
-    person_type = Column(String, nullable=False)
-    linked_visitor_id = Column(Integer, ForeignKey("visitors.id"), nullable=True)
-    linked_employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
-    check_in_time = Column(String, nullable=False)
-    check_out_time = Column(String)
+    visitor_id = Column(Integer, ForeignKey("visitors.id"), nullable=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
+    
+    person_type = Column(String, nullable=False) # 'VISITOR', 'EMPLOYEE', 'DELIVERY'
+    badge_id = Column(String, unique=True, nullable=True) # Badge belongs to the visit, not the person
+    
+    check_in_time = Column(DateTime, default=datetime.utcnow)
+    check_out_time = Column(DateTime, nullable=True)
+    purpose = Column(String)
     notes = Column(Text)
 
-
-class Conversation(Base):
-    """AI conversation history."""
-
-    __tablename__ = "conversations"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_text = Column(Text)
-    ai_response = Column(Text)
-    timestamp = Column(String)
-
+    # Relationships
+    visitor = relationship("Visitor", back_populates="logs")
+    employee = relationship("Employee", back_populates="logs")
 
 class Settings(Base):
-    """Key-value application settings."""
-
+    """Key-value application settings (Company details, config, etc.)."""
     __tablename__ = "settings"
 
     key = Column(String, primary_key=True)
