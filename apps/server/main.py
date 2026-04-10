@@ -35,11 +35,9 @@ async def process_text_for_client(client_id: str, text: str) -> str:
         return ""
 
     try:
-        # 1) Pass text to your State Machine (query_router.py)
-        # This handles intent, check-ins, DB logs, and lookups cleanly.
+       
         reply_text = await route_query(client_id, text)
-        
-    
+
         return reply_text
 
     except Exception as e:
@@ -51,11 +49,13 @@ async def process_text_for_client(client_id: str, text: str) -> str:
 async def health():
     return {"status": "running"}
 
+
 # API endpoints for frontend (e.g. if someone clicks 'Reset Session' on the UI)
 @app.post("/reset_session/{client_id}")
 async def reset_session(client_id: str):
     clear_session_state(client_id)
     return {"status": "cleared"}
+
 
 # Include routes after dispatcher is defined
 from routes.api_routes import router as api_router
@@ -63,6 +63,7 @@ from routes.websocket_routes import router as websocket_router
 
 app.include_router(api_router)
 app.include_router(websocket_router)
+
 
 def main():
     logger.info("Starting AlmostHuman Voice Assistant server...")
@@ -75,6 +76,7 @@ def main():
     )
     server = uvicorn.Server(config)
     server.run()
+
 
 if __name__ == "__main__":
     main()

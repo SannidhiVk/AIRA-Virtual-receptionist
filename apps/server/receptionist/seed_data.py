@@ -8,6 +8,7 @@ from datetime import datetime
 from receptionist.database import SessionLocal, init_db
 from receptionist.models import Employee, Settings
 
+
 def seed_database():
     init_db()
     session = SessionLocal()
@@ -20,7 +21,10 @@ def seed_database():
 
         print("Seeding initial company settings...")
         settings = [
-            Settings(key="company_name", value="Sharp Software Development India Private Limited"),
+            Settings(
+                key="company_name",
+                value="Sharp Software Development India Private Limited",
+            ),
             Settings(key="company_address", value="123 Innovation Drive, Tech Park"),
             Settings(key="company_phone", value="+91-80-5555-0199"),
             Settings(key="company_email", value="contact@sharpsoftware.in"),
@@ -37,7 +41,7 @@ def seed_database():
                 role="HR Manager",
                 location="Floor 2, Room 201",
                 extension="101",
-                is_public=True
+                is_public=True,
             ),
             Employee(
                 name="Arjun",
@@ -46,7 +50,7 @@ def seed_database():
                 role="Lead Engineer",
                 location="Floor 3, Desk 35",
                 extension="102",
-                is_public=True
+                is_public=True,
             ),
             Employee(
                 name="Suresh",
@@ -55,7 +59,7 @@ def seed_database():
                 role="CEO",
                 location="Floor 5, Executive Suite",
                 extension="100",
-                is_public=True
+                is_public=True,
             ),
             Employee(
                 name="Jack",
@@ -64,7 +68,7 @@ def seed_database():
                 role="Sales Director",
                 location="Floor 1, Room 105",
                 extension="104",
-                is_public=True
+                is_public=True,
             ),
             Employee(
                 name="john",
@@ -73,7 +77,7 @@ def seed_database():
                 role="IT Administrator",
                 location="Floor 1, Tech Bar",
                 extension="110",
-                is_public=True
+                is_public=True,
             ),
             Employee(
                 name="Virat",
@@ -82,7 +86,7 @@ def seed_database():
                 role="UX/UI Designer",
                 location="Floor 2, Creative Studio",
                 extension="115",
-                is_public=True
+                is_public=True,
             ),
             Employee(
                 name="Ravi",
@@ -91,7 +95,7 @@ def seed_database():
                 role="Chief Financial Officer",
                 location="Floor 5, Room 502",
                 extension="120",
-                is_public=True
+                is_public=True,
             ),
             Employee(
                 name="Rahul",
@@ -100,7 +104,7 @@ def seed_database():
                 role="Marketing Coordinator",
                 location="Floor 2, Desk 12",
                 extension="125",
-                is_public=True
+                is_public=True,
             ),
             Employee(
                 name="Ramesh",
@@ -109,7 +113,7 @@ def seed_database():
                 role="Data Scientist",
                 location="Floor 3, Desk 42",
                 extension="130",
-                is_public=True
+                is_public=True,
             ),
             Employee(
                 name="lucy",
@@ -118,7 +122,7 @@ def seed_database():
                 role="Legal Counsel",
                 location="Floor 4, Room 410",
                 extension="140",
-                is_public=True
+                is_public=True,
             ),
             Employee(
                 name="Cookie",
@@ -127,7 +131,7 @@ def seed_database():
                 role="Accountant",
                 location="Floor 4, Desk 8",
                 extension="145",
-                is_public=True
+                is_public=True,
             ),
             Employee(
                 name="Jim",
@@ -136,12 +140,12 @@ def seed_database():
                 role="Operations Manager",
                 location="Floor 1, Room 112",
                 extension="150",
-                is_public=True
-            )
+                is_public=True,
+            ),
         ]
         session.add_all(employees)
         session.commit()
-        
+
         print("Database seeded successfully with 12 employees!")
 
     except Exception as e:
@@ -149,6 +153,7 @@ def seed_database():
         print(f"Error seeding database: {e}")
     finally:
         session.close()
+
 
 if __name__ == "__main__":
     seed_database()
