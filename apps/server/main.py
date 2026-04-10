@@ -1,3 +1,12 @@
+import sys
+from pathlib import Path
+
+# Ensure `apps/server` is always importable regardless of launch cwd.
+SERVER_DIR = Path(__file__).resolve().parent
+SERVER_DIR_STR = str(SERVER_DIR)
+if SERVER_DIR_STR not in sys.path:
+    sys.path.insert(0, SERVER_DIR_STR)
+
 import torch
 import uvicorn
 from fastapi import FastAPI
@@ -9,18 +18,14 @@ from core.lifespan import lifespan
 from services.query_router import route_query, clear_session_state
 
 app = FastAPI(
-    title="AlmostHuman Voice Assistant",
-    description="CPU-optimized voice assistant with real-time speech recognition, conversational brain, and text-to-speech.",
+    title="Jarvis Voice Assistant",
     version="1.0.0",
     lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -66,14 +71,8 @@ app.include_router(websocket_router)
 
 
 def main():
-    logger.info("Starting AlmostHuman Voice Assistant server...")
-    config = uvicorn.Config(
-        app="main:app",
-        host="0.0.0.0",
-        port=8000,
-        log_level="info",
-        reload=True,
-    )
+    logger.info("Starting Jarvis Voice Assistant...")
+    config = uvicorn.Config(app="main:app", host="0.0.0.0", port=8000, reload=True)
     server = uvicorn.Server(config)
     server.run()
 

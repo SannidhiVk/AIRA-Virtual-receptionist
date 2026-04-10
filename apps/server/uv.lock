@@ -1244,6 +1244,23 @@ wheels = [
 ]
 
 [[package]]
+name = "openwakeword"
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "onnxruntime" },
+    { name = "requests" },
+    { name = "scikit-learn" },
+    { name = "scipy" },
+    { name = "tflite-runtime", marker = "sys_platform == 'linux'" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b5/9b/73b7d98b07f4e1f525ad39703e0c5f30ff61c3fa16c8bfe4d99eadc0567a/openwakeword-0.6.0.tar.gz", hash = "sha256:36858d90f1183e307485597a912a4e3c3384b14ea9923f83feaffae7c1565565", size = 70830, upload-time = "2024-02-11T20:56:17.854Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8a/33/dafd6822bebe463a9098951d06a0d88fb4f8c946ce087025bc4fa132e533/openwakeword-0.6.0-py3-none-any.whl", hash = "sha256:6f423a4e3ae9dd0e3cd12b50ff8abf69679f687b4ab349d7c82c021c0e2abc9d", size = 60690, upload-time = "2024-02-11T20:56:16.179Z" },
+]
+
+[[package]]
 name = "packaging"
 version = "25.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1717,6 +1734,25 @@ wheels = [
 ]
 
 [[package]]
+name = "scikit-learn"
+version = "1.7.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "joblib" },
+    { name = "numpy" },
+    { name = "scipy" },
+    { name = "threadpoolctl" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/98/c2/a7855e41c9d285dfe86dc50b250978105dce513d6e459ea66a6aeb0e1e0c/scikit_learn-1.7.2.tar.gz", hash = "sha256:20e9e49ecd130598f1ca38a1d85090e1a600147b9c02fa6f15d69cb53d968fda", size = 7193136, upload-time = "2025-09-09T08:21:29.075Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ba/3e/daed796fd69cce768b8788401cc464ea90b306fb196ae1ffed0b98182859/scikit_learn-1.7.2-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:6b33579c10a3081d076ab403df4a4190da4f4432d443521674637677dc91e61f", size = 9336221, upload-time = "2025-09-09T08:20:19.328Z" },
+    { url = "https://files.pythonhosted.org/packages/1c/ce/af9d99533b24c55ff4e18d9b7b4d9919bbc6cd8f22fe7a7be01519a347d5/scikit_learn-1.7.2-cp310-cp310-macosx_12_0_arm64.whl", hash = "sha256:36749fb62b3d961b1ce4fedf08fa57a1986cd409eff2d783bca5d4b9b5fce51c", size = 8653834, upload-time = "2025-09-09T08:20:22.073Z" },
+    { url = "https://files.pythonhosted.org/packages/58/0e/8c2a03d518fb6bd0b6b0d4b114c63d5f1db01ff0f9925d8eb10960d01c01/scikit_learn-1.7.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:7a58814265dfc52b3295b1900cfb5701589d30a8bb026c7540f1e9d3499d5ec8", size = 9660938, upload-time = "2025-09-09T08:20:24.327Z" },
+    { url = "https://files.pythonhosted.org/packages/2b/75/4311605069b5d220e7cf5adabb38535bd96f0079313cdbb04b291479b22a/scikit_learn-1.7.2-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:4a847fea807e278f821a0406ca01e387f97653e284ecbd9750e3ee7c90347f18", size = 9477818, upload-time = "2025-09-09T08:20:26.845Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/9b/87961813c34adbca21a6b3f6b2bea344c43b30217a6d24cc437c6147f3e8/scikit_learn-1.7.2-cp310-cp310-win_amd64.whl", hash = "sha256:ca250e6836d10e6f402436d6463d6c0e4d8e0234cfb6a9a47835bd392b852ce5", size = 8886969, upload-time = "2025-09-09T08:20:29.329Z" },
+]
+
+[[package]]
 name = "scipy"
 version = "1.15.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1960,6 +1996,7 @@ dependencies = [
     { name = "google-auth-oauthlib" },
     { name = "groq" },
     { name = "kokoro" },
+    { name = "openwakeword" },
     { name = "packaging" },
     { name = "peft" },
     { name = "pip" },
@@ -1969,6 +2006,7 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "torch" },
     { name = "uvicorn" },
+    { name = "webrtcvad" },
     { name = "websockets" },
     { name = "wheel" },
 ]
@@ -1991,6 +2029,7 @@ requires-dist = [
     { name = "google-auth-oauthlib" },
     { name = "groq", specifier = ">=0.31.0" },
     { name = "kokoro" },
+    { name = "openwakeword" },
     { name = "packaging" },
     { name = "peft", specifier = "==0.13.2" },
     { name = "pip", specifier = ">=25.1.1" },
@@ -2001,10 +2040,24 @@ requires-dist = [
     { name = "sqlalchemy", specifier = ">=2.0.0" },
     { name = "torch", specifier = "==2.6.0+cu124" },
     { name = "uvicorn", specifier = ">=0.34.3" },
+    { name = "webrtcvad" },
     { name = "websockets" },
     { name = "wheel" },
 ]
 provides-extras = ["dev"]
+
+[[package]]
+name = "tflite-runtime"
+version = "2.14.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9e/1f/aade0d066bacbe697946ae21f0467a702d81adb939bb64515e9abebae9ed/tflite_runtime-2.14.0-cp310-cp310-manylinux2014_x86_64.whl", hash = "sha256:bb11df4283e281cd609c621ac9470ad0cb5674408593272d7593a2c6bde8a808", size = 2413436, upload-time = "2023-10-03T21:15:38.025Z" },
+    { url = "https://files.pythonhosted.org/packages/04/dd/a701667be92bb884644eeec91ebbde57e197d27d9a79241169b6ce15e1ad/tflite_runtime-2.14.0-cp310-cp310-manylinux_2_34_aarch64.whl", hash = "sha256:d38c6885f5e9673c11a61ccec5cad7c032ab97340718d26b17794137f398b780", size = 2324943, upload-time = "2023-10-03T21:15:40.253Z" },
+    { url = "https://files.pythonhosted.org/packages/d0/33/ad39ee3706a67139dde4624e66a2dd65604cc800dbb861f719f7cb1f1edc/tflite_runtime-2.14.0-cp310-cp310-manylinux_2_34_armv7l.whl", hash = "sha256:7fe33f763263d1ff2733a09945a7547ab063d8bc311fd2a1be8144d850016ad3", size = 1818760, upload-time = "2023-10-03T21:15:42.321Z" },
+]
 
 [[package]]
 name = "thinc"
@@ -2033,6 +2086,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/5f/76/98dd4983efbd7eebdd5d5964c566c8e5c10782db1599fc694610ba49ba75/thinc-8.3.6-cp310-cp310-musllinux_1_2_aarch64.whl", hash = "sha256:0e913f120fde25aea9f052e8cd45dd9cd36553ff1903e312b7302dd91000125a", size = 4949592, upload-time = "2025-04-04T11:49:50.64Z" },
     { url = "https://files.pythonhosted.org/packages/cd/7f/d867c7bcb22cd6022d9931f625340b26e86fd9cf25905adc408bc7393799/thinc-8.3.6-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:03706680bc0ea92036ac2e00f46bc86116ac6dccb6212b0c632e835176f666b2", size = 5165689, upload-time = "2025-04-04T11:49:52.385Z" },
     { url = "https://files.pythonhosted.org/packages/ed/8c/d6000d6d19cc1fc800ceb073b44403ce27a3414248cede691b5c49cbfb22/thinc-8.3.6-cp310-cp310-win_amd64.whl", hash = "sha256:0902314ecb83a225f41ab6121ceaf139b5da8bb6ada9e58031bad6c46134b8d4", size = 1773832, upload-time = "2025-04-04T11:49:54.259Z" },
+]
+
+[[package]]
+name = "threadpoolctl"
+version = "3.6.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b7/4d/08c89e34946fce2aec4fbb45c9016efd5f4d7f24af8e5d93296e935631d8/threadpoolctl-3.6.0.tar.gz", hash = "sha256:8ab8b4aa3491d812b623328249fab5302a68d2d71745c8a4c719a2fcaba9f44e", size = 21274, upload-time = "2025-03-13T13:49:23.031Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/32/d5/f9a850d79b0851d1d4ef6456097579a9005b31fea68726a4ae5f2d82ddd9/threadpoolctl-3.6.0-py3-none-any.whl", hash = "sha256:43a0b8fd5a2928500110039e43a5eed8480b918967083ea48dc3ab9f13c4a7fb", size = 18638, upload-time = "2025-03-13T13:49:21.846Z" },
 ]
 
 [[package]]
@@ -2101,8 +2163,8 @@ dependencies = [
     { name = "typing-extensions" },
 ]
 wheels = [
-    { url = "https://download.pytorch.org/whl/cu124/torch-2.6.0%2Bcu124-cp310-cp310-linux_x86_64.whl", hash = "sha256:7f2ba7f7c0459320a521696f6b5bccc187f59890b23c9dfb6c49b0b87c6bfc97" },
-    { url = "https://download.pytorch.org/whl/cu124/torch-2.6.0%2Bcu124-cp310-cp310-win_amd64.whl", hash = "sha256:7cc45c5b39d74875cfafe908b7f55c544147cc16b01e795feb2fe766583efe78" },
+    { url = "https://download-r2.pytorch.org/whl/cu124/torch-2.6.0%2Bcu124-cp310-cp310-linux_x86_64.whl", hash = "sha256:7f2ba7f7c0459320a521696f6b5bccc187f59890b23c9dfb6c49b0b87c6bfc97" },
+    { url = "https://download-r2.pytorch.org/whl/cu124/torch-2.6.0%2Bcu124-cp310-cp310-win_amd64.whl", hash = "sha256:7cc45c5b39d74875cfafe908b7f55c544147cc16b01e795feb2fe766583efe78" },
 ]
 
 [[package]]
@@ -2142,8 +2204,8 @@ name = "triton"
 version = "3.2.0"
 source = { registry = "https://download.pytorch.org/whl/cu124" }
 wheels = [
-    { url = "https://download.pytorch.org/whl/triton-3.2.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b3e54983cd51875855da7c68ec05c05cf8bb08df361b1d5b69e05e40b0c9bd62" },
-    { url = "https://download.pytorch.org/whl/triton-3.2.0-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:468a01c9aa6e18fe2bba49c5e5002c1fd5f61b1af891c0594eaf446fe1aaae10" },
+    { url = "https://download-r2.pytorch.org/whl/triton-3.2.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b3e54983cd51875855da7c68ec05c05cf8bb08df361b1d5b69e05e40b0c9bd62" },
+    { url = "https://download-r2.pytorch.org/whl/triton-3.2.0-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:468a01c9aa6e18fe2bba49c5e5002c1fd5f61b1af891c0594eaf446fe1aaae10" },
 ]
 
 [[package]]
@@ -2322,6 +2384,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/a7/1a/9c522dd61b52939c2
 wheels = [
     { url = "https://files.pythonhosted.org/packages/2a/87/abd57374044e1f627f0a905ac33c1a7daab35a3a815abfea4e1bafd3fdb1/weasel-0.4.1-py3-none-any.whl", hash = "sha256:24140a090ea1ac512a2b2f479cc64192fd1d527a7f3627671268d08ed5ac418c", size = 50270, upload-time = "2024-05-15T08:52:52.977Z" },
 ]
+
+[[package]]
+name = "webrtcvad"
+version = "2.0.10"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/89/34/e2de2d97f3288512b9ea56f92e7452f8207eb5a0096500badf9dfd48f5e6/webrtcvad-2.0.10.tar.gz", hash = "sha256:f1bed2fb25b63fb7b1a55d64090c993c9c9167b28485ae0bcdd81cf6ede96aea", size = 66156, upload-time = "2017-01-07T23:05:18.732Z" }
 
 [[package]]
 name = "websockets"

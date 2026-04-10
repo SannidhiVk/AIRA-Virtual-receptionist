@@ -98,21 +98,13 @@ const TalkingHead: React.FC<TalkingHeadProps> = ({
 
   // Convert base64 to ArrayBuffer
   const base64ToArrayBuffer = useCallback((base64: string) => {
-    const binaryString = atob(base64);
+    const sanitizedBase64 = base64.trim().replace(/\s/g, '');
+    const binaryString = atob(sanitizedBase64);
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
       bytes[i] = binaryString.charCodeAt(i);
     }
     return bytes.buffer;
-  }, []);
-
-  // Convert Int16Array to Float32Array
-  const int16ArrayToFloat32 = useCallback((int16Array: Int16Array) => {
-    const float32Array = new Float32Array(int16Array.length);
-    for (let i = 0; i < int16Array.length; i++) {
-      float32Array[i] = int16Array[i] / 32768.0;
-    }
-    return float32Array;
   }, []);
 
   // Play next audio in queue
@@ -198,24 +190,10 @@ const TalkingHead: React.FC<TalkingHeadProps> = ({
       try {
         await initAudioContext();
 
-        // Convert base64 to audio buffer
+        // Use native Web Audio API to decode the WAV file directly
         const arrayBuffer = base64ToArrayBuffer(base64Audio);
-        const int16Array = new Int16Array(arrayBuffer);
-        const float32Array = int16ArrayToFloat32(int16Array);
-
-        console.log('Audio conversion successful:', {
-          arrayBufferLength: arrayBuffer.byteLength,
-          int16Length: int16Array.length,
-          float32Length: float32Array.length
-        });
-
-        // Create AudioBuffer
-        const audioBuffer = audioContextRef.current!.createBuffer(
-          1,
-          float32Array.length,
-          sampleRate
-        );
-        audioBuffer.copyToChannel(float32Array, 0);
+        const audioBuffer =
+          await audioContextRef.current!.decodeAudioData(arrayBuffer);
 
         console.log('AudioBuffer created:', {
           duration: audioBuffer.duration,
@@ -257,7 +235,7 @@ const TalkingHead: React.FC<TalkingHeadProps> = ({
         );
       }
     },
-    [initAudioContext, base64ToArrayBuffer, int16ArrayToFloat32, playNextAudio]
+    [initAudioContext, base64ToArrayBuffer, playNextAudio]
   );
 
   // Handle interrupt from server

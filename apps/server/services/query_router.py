@@ -10,9 +10,23 @@ from models.groq_processor import GroqProcessor
 
 logger = logging.getLogger(__name__)
 
-COMPANY_NAME = "Sharp Software"
-AI_NAME = "Sannika"
-PRONOUNS = {"him", "her", "them", "he", "she", "they", "it", "that person", "someone", "this guy"}
+AI_NAME = "Jarvis"  # Changed from Sannika to Jarvis to match your request
+COMPANY_NAME = "Sharp Software Development India Pvt. Ltd."
+
+PRONOUNS = {
+    "him",
+    "her",
+    "them",
+    "he",
+    "she",
+    "they",
+    "it",
+    "that person",
+    "someone",
+    "this guy",
+    "this person",
+}
+
 
 class State:
     INIT               = "INIT"
