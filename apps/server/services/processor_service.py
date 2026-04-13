@@ -18,14 +18,7 @@ async def process_text_for_client(client_id: str, text: str) -> str:
         return WAKE_WORD_GREETING
 
     try:
-        # Meeting scheduler owns slot-filling + side-effect execution
-        # (DB schedule, calendar invite, notifications). Route there first.
-        from meeting_scheduler import handle_meeting_request
         from services.query_router import route_query
-
-        handled, reply = await handle_meeting_request(client_id, text)
-        if handled:
-            return reply
 
         return await route_query(client_id, text)
     except Exception as exc:

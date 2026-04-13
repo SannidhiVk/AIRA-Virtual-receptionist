@@ -11,10 +11,6 @@ from .database import (
     # Reception log
     log_reception_entry,
     log_reception_checkout,
-    # Conversations
-    save_conversation,
-    get_all_conversations,
-    get_recent_conversations,
     # Settings
     set_setting,
     get_setting,
@@ -40,23 +36,19 @@ from .database import (
 )
 from .models import (
     Base,
-    Conversation,
     Employee,
     Meeting,
     ReceptionLog,
     Settings,
     Visitor,
 )
-from .seed_data import seed_database
+
 
 __all__ = [
     # database helpers
     "init_db",
     "log_reception_entry",
     "log_reception_checkout",
-    "save_conversation",
-    "get_all_conversations",
-    "get_recent_conversations",
     "set_setting",
     "get_setting",
     "add_visitor",
@@ -76,7 +68,6 @@ __all__ = [
     "engine",
     # models
     "Base",
-    "Conversation",
     "Employee",
     "Meeting",
     "ReceptionLog",
