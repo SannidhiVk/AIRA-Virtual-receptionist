@@ -235,14 +235,17 @@ def _commit_meeting(
 
     # 2. Trigger the Google Calendar API
     if res and emp_email:
-        from services.calendar_service import schedule_google_meeting_background
+        from services.calendar_service import send_calendar_invite
 
-        schedule_google_meeting_background(
-            visitor_name=org_name,
-            employee_email=emp_email,
-            date_str=date_str,
-            time_str=time_str,
-        )
+        try:
+            meeting_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+            send_calendar_invite(
+                visitor_name=org_name,
+                employee_email=emp_email,
+                dt=meeting_dt,
+            )
+        except Exception as e:
+            logger.error("Failed to send calendar invite: %s", e)
 
     return res is not None
 
