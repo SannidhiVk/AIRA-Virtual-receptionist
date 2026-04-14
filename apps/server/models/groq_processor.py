@@ -159,7 +159,6 @@ def _read_api_key() -> str:
 def _build_system_message(company_info: Optional[dict] = None) -> str:
     current_time = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
 
-    # Inject current date and time to prevent hallucinations
     system = (
         BASE_SYSTEM_PROMPT
         + f"\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCURRENT DATE & TIME\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n{current_time}"
@@ -168,17 +167,21 @@ def _build_system_message(company_info: Optional[dict] = None) -> str:
     if company_info:
         system += "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCOMPANY CONTEXT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         if company_info.get("company_name"):
-            system += f"\nCompany: {company_info['company_name']}"
-        if company_info.get("company_location"):
-            system += f"\nLocation: {company_info['company_location']}"
-        if company_info.get("office_hours"):
-            system += f"\nOffice Hours: {company_info['office_hours']}"
-        if company_info.get("departments"):
-            system += f"\nDepartments: {company_info['departments']}"
+            system += f"\nCompany Name: {company_info['company_name']}"
+        if company_info.get("company_address"):
+            system += f"\nOffice Address: {company_info['company_address']}"
+        if company_info.get("company_phone"):
+            system += f"\nContact Phone: {company_info['company_phone']}"
+        if company_info.get("company_email"):
+            system += f"\nContact Email: {company_info['company_email']}"
+        if company_info.get("company_website"):
+            system += f"\nWebsite: {company_info['company_website']}"
+
         if company_info.get("dynamic_employee"):
             system += f"\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nEMPLOYEE INFO\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n{company_info['dynamic_employee']}"
         if company_info.get("visitor_name"):
             system += f"\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCURRENT VISITOR: {company_info['visitor_name']}\n⚠ Address this visitor ONLY by this name.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
     return system
 
 

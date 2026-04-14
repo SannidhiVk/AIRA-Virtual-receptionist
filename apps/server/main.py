@@ -18,14 +18,18 @@ from core.lifespan import lifespan
 from services.query_router import route_query, clear_session_state
 
 app = FastAPI(
-    title="Jarvis Voice Assistant",
+    title="AlmostHuman Voice Assistant",
+    description="CPU-optimized voice assistant with real-time speech recognition, conversational brain, and text-to-speech.",
     version="1.0.0",
     lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -40,7 +44,7 @@ async def process_text_for_client(client_id: str, text: str) -> str:
         return ""
 
     try:
-       
+
         reply_text = await route_query(client_id, text)
 
         return reply_text
@@ -71,8 +75,14 @@ app.include_router(websocket_router)
 
 
 def main():
-    logger.info("Starting Jarvis Voice Assistant...")
-    config = uvicorn.Config(app="main:app", host="0.0.0.0", port=8000, reload=True)
+    logger.info("Starting AlmostHuman Voice Assistant server...")
+    config = uvicorn.Config(
+        app="main:app",
+        host="0.0.0.0",
+        port=8000,
+        log_level="info",
+        reload=True,
+    )
     server = uvicorn.Server(config)
     server.run()
 
