@@ -5,8 +5,9 @@ description = "TalkMateAI server application"
 readme = "README.md"
 requires-python = ">=3.10,<3.11"
 dependencies = [
-    # PyTorch with CUDA support - specific versions
-    "torch==2.6.0+cu124",
+    # Explicitly pin BOTH to the matching stable CUDA versions!
+    "torch==2.5.1+cu124",
+    "torchaudio==2.5.1+cu124",
     # From requirements.txt
     "sqlalchemy>=2.0.0",
     "soundfile==0.13.1",
@@ -28,7 +29,7 @@ dependencies = [
     "google-auth-httplib2",
     "google-auth-oauthlib",
     "openwakeword",
-    "webrtcvad",
+    "silero-vad",
 ]
 
 [project.optional-dependencies]

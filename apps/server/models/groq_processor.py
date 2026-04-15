@@ -16,27 +16,29 @@ COMPANY_NAME = "Sharp Software Development India Pvt. Ltd."
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SYSTEM PROMPT
+# FIX D — Removed the instruction telling the LLM to use filler openers
+# like "Certainly!", "Absolutely!", "Of course!" — the meta prompt explicitly
+# bans these. Having both was contradictory; the guide's rule wins.
 # ─────────────────────────────────────────────────────────────────────────────
 
-BASE_SYSTEM_PROMPT = f"""You are {AI_NAME}, an intelligent, highly proactive, and warm virtual receptionist at {COMPANY_NAME}.
-You exist solely to assist visitors and employees at this office.
+BASE_SYSTEM_PROMPT = f"""You are {AI_NAME}, the intelligent AI receptionist at {COMPANY_NAME}.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 IDENTITY & TONE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Your name is {AI_NAME}. Introduce yourself naturally, but don't over-repeat it.
-• Be highly conversational, smart, human-like, and polite. Act exactly like a premium concierge or an advanced AI assistant (like Alexa).
-• If a visitor asks a question, answer it directly and intelligently. Do not force them into rigid scripts.
-• Vary your conversational openers naturally. Never start two consecutive replies 
-   the same way. Examples: "Of course!", "Absolutely!", "Happy to help!", 
-   "Sure thing!", "No problem at all!", "Let me take care of that for you." 
-   Avoid repeating "Got it" more than once per conversation.
-• Keep replies concise but fluid (usually 1-3 sentences).
+• Your name is {AI_NAME}. Introduce yourself naturally when appropriate, but don't over-repeat it.
+• Be warm, conversational, and human — like a smart, attentive receptionist, not a scripted bot.
+• If a visitor asks a question, answer it directly and intelligently.
+• Keep replies concise but natural — usually 1-3 sentences.
+• Do NOT use filler openers like "Certainly!", "Absolutely!", "Of course!", "Happy to help!", "Sure thing!" — just respond naturally and directly.
+• Vary how you open replies. Never start two consecutive replies the same way.
+• Never correct a visitor's greeting (if they say Good Morning at night, just respond warmly).
+• Never argue about a visitor's name — trust what they say.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 WHAT YOU CAN DO
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. Visitor check-in: collect name → who they're seeing → purpose. 
+1. Visitor check-in: collect name → who they're seeing → purpose.
 2. Deliveries: ask who it is for, tell them to leave it at the desk, and say you will notify the recipient.
 3. Employee/department lookup: floor, cabin, extension — ONLY from EMPLOYEE INFO below.
 4. Meeting scheduling: help set up future appointments.
@@ -49,6 +51,8 @@ ABSOLUTE PROHIBITIONS
 ✗ Never invent an employee name, floor, cabin, extension, or email.
 ✗ Never roleplay as any employee or manager.
 ✗ Never say you are an AI, a bot, or a computer.
+✗ Never address a delivery person or vendor by their company name (e.g. don't say "Hello Swiggy").
+✗ Never ask for information the visitor has already provided.
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -185,11 +189,13 @@ def _build_system_message(company_info: Optional[dict] = None) -> str:
     return system
 
 
+# FIX E — Added "Jarvis" to the prefix-strip list so "Jarvis: ..." replies
+# are cleaned the same way "AI: ..." and "Assistant: ..." are.
 def _clean_reply(text: str) -> str:
     if not text:
         return ""
     text = re.sub(
-        r"^(AI|Assistant|Sannika|AlmostHuman)\s*:\s*", "", text, flags=re.IGNORECASE
+        r"^(AI|Assistant|Jarvis|Sannika|AlmostHuman)\s*:\s*", "", text, flags=re.IGNORECASE
     )
     return text.strip()
 
@@ -238,7 +244,7 @@ class GroqProcessor:
             response = await self.client.chat.completions.create(
                 model=self.model_name,
                 messages=messages,
-                max_tokens=120,  # also increased — 100 cuts off responses
+                max_tokens=120,
                 temperature=0.6,
             )
             reply = _clean_reply(response.choices[0].message.content)
@@ -351,9 +357,9 @@ The visitor asked: "{question}"
 Verified directory records: {info}
 {address_clause}
 
-Respond naturally and conversationally in 1-3 sentences. State the floor and cabin if found. 
-If no records are found, apologize politely and suggest they take a seat while you contact administration to help them. 
-Tone: warm, smart, human, professional."""
+Respond naturally and conversationally in 1-3 sentences. State the floor and cabin if found.
+If no records are found, apologize politely and suggest they take a seat while you contact administration to help them.
+Tone: warm, smart, human, professional. Do not use filler openers like "Certainly!" or "Absolutely!"."""
         try:
             response = await self.client.chat.completions.create(
                 model=self.model_name,

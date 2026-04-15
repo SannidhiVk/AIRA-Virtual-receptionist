@@ -10,7 +10,7 @@ from models.groq_processor import GroqProcessor
 
 logger = logging.getLogger(__name__)
 
-AI_NAME = "Jarvis"  # Changed from Sannika to Jarvis to match your request
+AI_NAME = "Jarvis"
 COMPANY_NAME = "Sharp Software Development India Pvt. Ltd."
 
 PRONOUNS = {
@@ -235,6 +235,19 @@ def _commit_meeting(
             time_str=time_str,
         )
 
+        import asyncio
+        from services.notification_service import send_meeting_notification
+        asyncio.create_task(
+            send_meeting_notification(
+                employee_name=emp_name,
+                employee_email=emp_email,
+                organizer_name=org_name,
+                meeting_date=date_str,
+                meeting_time=time_str,
+                purpose=purpose or "Not specified",
+            )
+        )
+
     return res is not None
 
 
@@ -280,32 +293,43 @@ def _merge_checkin_entities(
             state["meeting_with_raw"] = resolved
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX A — Upgraded _llm_reply with full context-aware prompt
+# Now passes everything Jarvis already knows so it never asks twice.
+# ─────────────────────────────────────────────────────────────────────────────
 async def _llm_reply(
     situation: str, context: dict, user_query: str = None, client_id: str = None
 ) -> str:
     llm = GroqProcessor.get_instance()
     current_time = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
 
-    lines = [f"Your name: {AI_NAME}"]
+    known_info = []
     for k, v in context.items():
-        if v: lines.append(f"{k.replace('_', ' ').capitalize()}: {v}")
+        if v:
+            known_info.append(f"- {k.replace('_', ' ').capitalize()}: {v}")
 
-    prompt = f"""You are {AI_NAME}, an intelligent corporate receptionist.
+    known_block = "\n".join(known_info) if known_info else "- None collected yet"
+
+    prompt = f"""You are {AI_NAME}, the intelligent AI receptionist at {COMPANY_NAME}.
 CURRENT DATE & TIME: {current_time}
-FACTS:
-{chr(10).join(lines)}
 
-GOAL:
+WHAT YOU ALREADY KNOW ABOUT THIS VISITOR:
+{known_block}
+
+YOUR TASK RIGHT NOW:
 {situation}
 
 RULES:
-1. Answer intelligently in 1-3 sentences.
-2. If the visitor's name is a company/job (Electrician, Swiggy, Amazon), DO NOT address them by that name.
-3. NEVER correct the visitor's greeting (if they say Good Morning in the evening, ignore it).
-4. NEVER argue about their name. Trust what they say.
+1. Respond in 1-3 sentences only — you are speaking out loud, keep it natural and concise.
+2. Never ask for information already listed under WHAT YOU ALREADY KNOW.
+3. If the visitor's name is a company or job title (Swiggy, Amazon, Electrician), do NOT address them by that name.
+4. Never correct the visitor's greeting. Never argue about their name. Trust what they say.
+5. Do not use filler words like "Certainly!", "Absolutely!", "Of course!" — just respond naturally.
+6. If the visitor is leaving (saying bye, thanks, see you), say goodbye warmly and do not ask anything else.
 """
     if user_query:
-        prompt += f'\nTHE VISITOR SAID:\n"{user_query}"\n'
+        prompt += f'\nTHE VISITOR JUST SAID:\n"{user_query}"\n'
+
     return await llm.get_raw_response(prompt, client_id=client_id)
 
 
@@ -466,6 +490,17 @@ async def route_query(client_id: str, user_query: str) -> str:
     state = get_session_state(client_id)
     llm = GroqProcessor.get_instance()
 
+    # ─── WALKAWAY SIGNAL — sent internally when visitor goes silent ───────────
+    # FIX D (from guide Change 4): handle __visitor_left__ before anything else.
+    if user_query == "__visitor_left__":
+        clear_session_state(client_id, retain_name=False)
+        return await _llm_reply(
+            "The visitor seems to have walked away. Say a soft, natural goodbye to the empty desk.",
+            {},
+            client_id=client_id,
+        )
+    # ─────────────────────────────────────────────────────────────────────────
+
     # --- SMART TIMEOUT LOGIC ---
     time_since_last = (datetime.utcnow() - state["last_active"]).total_seconds()
     timeout_limit = 300 if state["conv_state"] == State.COMPLETED else 60
@@ -478,8 +513,11 @@ async def route_query(client_id: str, user_query: str) -> str:
     is_greeting = re.search(
         r"\b(hello|hi|hey|good morning|good afternoon)\b", user_query.lower()
     )
+
+    # FIX B & C — expanded goodbye phrases + fires at ANY conv_state
     is_goodbye = re.search(
-        r"\b(bye|goodbye|thank you|thanks|no thanks)\b", user_query.lower()
+        r"\b(bye|goodbye|thank you|thanks|no thanks|see you|see ya|take care|that'?s all|that will be all|i'?m done|im done|have a good day)\b",
+        user_query.lower()
     )
 
     active_states = [
@@ -500,11 +538,12 @@ async def route_query(client_id: str, user_query: str) -> str:
         "intent", "general_conversation"
     )
 
-    if is_goodbye and state["conv_state"] in [State.COMPLETED, State.INIT]:
+    # FIX B — goodbye now fires at ANY state, not just COMPLETED/INIT
+    if is_goodbye:
         clear_session_state(client_id, retain_name=False)
         return await _llm_reply(
-            "Warmly say goodbye and wish them a great day. DO NOT ask if they need help.",
-            {},
+            "The visitor is leaving. Say a warm, natural goodbye. Do not ask any further questions.",
+            {"visitor_name": state.get("visitor_name")},
             user_query,
             client_id=client_id,
         )
@@ -615,7 +654,7 @@ async def _advance_checkin(
     if not state.get("visitor_name"):
         state["conv_state"] = State.COLLECTING_NAME
         return await _llm_reply(
-            f"Welcome the visitor. Ask for their name.",
+            "Welcome the visitor. Ask for their name.",
             {},
             user_query,
             client_id=client_id,
