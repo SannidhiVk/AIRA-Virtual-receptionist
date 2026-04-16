@@ -157,20 +157,12 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
             let timingData = null;
 
             if (data.word_timings) {
-              const usesMilliseconds = data.word_timings.some(
-                (wt) => wt.start_time > 20 || wt.end_time > 20
-              );
-              const toSeconds = (value: number) =>
-                usesMilliseconds ? value / 1000 : value;
-
-              // Convert to TalkingHead format
+              // TalkingHead expects wtimes/wdurations in milliseconds.
               timingData = {
                 words: data.word_timings.map((wt) => wt.word),
-                word_times: data.word_timings.map((wt) =>
-                  toSeconds(wt.start_time)
-                ),
+                word_times: data.word_timings.map((wt) => Number(wt.start_time)),
                 word_durations: data.word_timings.map(
-                  (wt) => toSeconds(wt.end_time) - toSeconds(wt.start_time)
+                  (wt) => Number(wt.end_time) - Number(wt.start_time)
                 )
               };
               console.log('Converted timing data:', timingData);
