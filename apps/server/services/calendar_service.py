@@ -98,20 +98,20 @@ def send_calendar_invite(
     except Exception as e:
         logger.error(f"Error creating calendar event: {e}")
         return None
+
+
 def schedule_google_meeting_background(
     visitor_name: str,
     employee_email: str,
-    date_str: str,   # "YYYY-MM-DD"
-    time_str: str,   # "HH:MM"
+    date_str: str,  # "YYYY-MM-DD"
+    time_str: str,  # "HH:MM"
 ) -> None:
     """
     Thin wrapper called by query_router._commit_meeting.
     Parses date/time strings and delegates to send_calendar_invite.
     """
     try:
-        dt = datetime.datetime.strptime(
-            f"{date_str} {time_str}", "%Y-%m-%d %H:%M"
-        )
+        dt = datetime.datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
         link = send_calendar_invite(
             visitor_name=visitor_name,
             employee_email=employee_email,

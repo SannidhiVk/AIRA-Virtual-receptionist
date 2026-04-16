@@ -193,7 +193,10 @@ def _clean_reply(text: str) -> str:
     if not text:
         return ""
     text = re.sub(
-        r"^(AI|Assistant|Jarvis|Sannika|AlmostHuman)\s*:\s*", "", text, flags=re.IGNORECASE
+        r"^(AI|Assistant|Jarvis|Sannika|AlmostHuman)\s*:\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
     )
     return text.strip()
 
