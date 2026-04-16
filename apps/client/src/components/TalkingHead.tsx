@@ -132,7 +132,11 @@ const TalkingHead: React.FC<TalkingHeadProps> = ({
         audioItem.timingData.length > 0
       ) {
         audioItem.timingData.forEach((t: any) => {
-          if (t.word && t.start_time !== undefined && t.end_time !== undefined) {
+          if (
+            t.word &&
+            t.start_time !== undefined &&
+            t.end_time !== undefined
+          ) {
             words.push(t.word);
             wtimes.push(Number(t.start_time));
             wdurations.push(Number(t.end_time) - Number(t.start_time));
@@ -143,7 +147,9 @@ const TalkingHead: React.FC<TalkingHeadProps> = ({
       else if (audioItem.timingData && audioItem.timingData.words) {
         words = (audioItem.timingData.words || []).map((w: any) => String(w));
         wtimes = (
-          audioItem.timingData.word_times || audioItem.timingData.wtimes || []
+          audioItem.timingData.word_times ||
+          audioItem.timingData.wtimes ||
+          []
         ).map((t: any) => Number(t));
         wdurations = (
           audioItem.timingData.word_durations ||
@@ -178,7 +184,10 @@ const TalkingHead: React.FC<TalkingHeadProps> = ({
           });
           started = true;
         } catch (errObjectForm) {
-          console.warn('speakAudio object-form failed, trying 2-arg form', errObjectForm);
+          console.warn(
+            'speakAudio object-form failed, trying 2-arg form',
+            errObjectForm
+          );
           try {
             headRef.current.speakAudio(audioItem.buffer, {
               words: words,
