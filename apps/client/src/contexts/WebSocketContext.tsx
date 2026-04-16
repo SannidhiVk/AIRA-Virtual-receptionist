@@ -160,7 +160,9 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
               // TalkingHead expects wtimes/wdurations in milliseconds.
               timingData = {
                 words: data.word_timings.map((wt) => wt.word),
-                word_times: data.word_timings.map((wt) => Number(wt.start_time)),
+                word_times: data.word_timings.map((wt) =>
+                  Number(wt.start_time)
+                ),
                 word_durations: data.word_timings.map(
                   (wt) => Number(wt.end_time) - Number(wt.start_time)
                 )
