@@ -73,7 +73,12 @@ class KokoroTTSProcessor:
                 ),
             )
 
-            # Process all generated segments and extract NATIVE timing
+            # TalkingHead expects wtimes/wdurations in milliseconds.
+            # Kokoro token timestamps are in seconds (float), so convert with *1000.
+            seconds_to_ms = 1000.0
+            logged_first_word = False
+
+            # Process all generated segments and extract native timing
             for i, result in enumerate(generator):
                 # Extract the components as shown in your screenshot
                 gs = result.graphemes  # str - the text graphemes
@@ -89,14 +94,28 @@ class KokoroTTSProcessor:
                 for token in tokens:
                     # Check if timing data is available
                     if token.start_ts is not None and token.end_ts is not None:
+                        start_time_ms = (token.start_ts * seconds_to_ms) + (
+                            time_offset * 1000.0
+                        )
+                        end_time_ms = (token.end_ts * seconds_to_ms) + (
+                            time_offset * 1000.0
+                        )
                         word_timing = {
                             "word": token.text,
-                            "start_time": (token.start_ts + time_offset)
-                            * 1000,  # Convert to milliseconds
-                            "end_time": (token.end_ts + time_offset)
-                            * 1000,  # Convert to milliseconds
+                            "start_time": start_time_ms,
+                            "end_time": end_time_ms,
                         }
                         all_word_timings.append(word_timing)
+                        if not logged_first_word:
+                            logger.info(
+                                "Initial timing check | word='%s' raw_start_ts=%s raw_end_ts=%s -> start_time_ms=%.2f end_time_ms=%.2f",
+                                token.text,
+                                token.start_ts,
+                                token.end_ts,
+                                start_time_ms,
+                                end_time_ms,
+                            )
+                            logged_first_word = True
                         logger.debug(
                             f"Word: '{token.text}' Start: {word_timing['start_time']:.1f}ms End: {word_timing['end_time']:.1f}ms"
                         )
@@ -157,7 +176,12 @@ class KokoroTTSProcessor:
                 ),
             )
 
-            # Process all generated segments and extract NATIVE timing
+            # TalkingHead expects wtimes/wdurations in milliseconds.
+            # Kokoro token timestamps are in seconds (float), so convert with *1000.
+            seconds_to_ms = 1000.0
+            logged_first_word = False
+
+            # Process all generated segments and extract native timing
             for i, result in enumerate(generator):
                 # Extract the components with NATIVE timing
                 gs = result.graphemes  # str
@@ -173,14 +197,28 @@ class KokoroTTSProcessor:
                 for token in tokens:
                     # Check if timing data is available
                     if token.start_ts is not None and token.end_ts is not None:
+                        start_time_ms = (token.start_ts * seconds_to_ms) + (
+                            time_offset * 1000.0
+                        )
+                        end_time_ms = (token.end_ts * seconds_to_ms) + (
+                            time_offset * 1000.0
+                        )
                         word_timing = {
                             "word": token.text,
-                            "start_time": (token.start_ts + time_offset)
-                            * 1000,  # Convert to milliseconds
-                            "end_time": (token.end_ts + time_offset)
-                            * 1000,  # Convert to milliseconds
+                            "start_time": start_time_ms,
+                            "end_time": end_time_ms,
                         }
                         all_word_timings.append(word_timing)
+                        if not logged_first_word:
+                            logger.info(
+                                "Chunk timing check | word='%s' raw_start_ts=%s raw_end_ts=%s -> start_time_ms=%.2f end_time_ms=%.2f",
+                                token.text,
+                                token.start_ts,
+                                token.end_ts,
+                                start_time_ms,
+                                end_time_ms,
+                            )
+                            logged_first_word = True
                         logger.debug(
                             f"Chunk word: '{token.text}' Start: {word_timing['start_time']:.1f}ms End: {word_timing['end_time']:.1f}ms"
                         )

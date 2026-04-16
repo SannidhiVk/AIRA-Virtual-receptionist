@@ -89,7 +89,7 @@ const TalkingHead: React.FC<TalkingHeadProps> = ({
   // Initialize audio context
   const initAudioContext = useCallback(async () => {
     if (!audioContextRef.current) {
-      audioContextRef.current = new AudioContext({ sampleRate: 22050 });
+      audioContextRef.current = new AudioContext({ sampleRate: 24000 });
     }
     if (audioContextRef.current.state === 'suspended') {
       await audioContextRef.current.resume();
@@ -122,34 +122,108 @@ const TalkingHead: React.FC<TalkingHeadProps> = ({
     console.log('Playing audio item:', audioItem);
 
     try {
-      if (
-        headRef.current &&
-        audioItem.timingData &&
-        audioItem.timingData.words
-      ) {
-        // Use TalkingHead with native timing
-        const speakData = {
-          audio: audioItem.buffer,
-          words: audioItem.timingData.words,
-          wtimes: audioItem.timingData.word_times,
-          wdurations: audioItem.timingData.word_durations
-        };
+      let words: string[] = [];
+      let wtimes: number[] = [];
+      let wdurations: number[] = [];
 
-        console.log('Using TalkingHead with timing data:', speakData);
-        headRef.current.speakAudio(speakData);
+      // 1. Handle Array format (from Python backend)
+      if (
+        Array.isArray(audioItem.timingData) &&
+        audioItem.timingData.length > 0
+      ) {
+        audioItem.timingData.forEach((t: any) => {
+          if (t.word && t.start_time !== undefined && t.end_time !== undefined) {
+            words.push(t.word);
+            wtimes.push(Number(t.start_time));
+            wdurations.push(Number(t.end_time) - Number(t.start_time));
+          }
+        });
+      }
+      // 2. Handle Object format (fallback)
+      else if (audioItem.timingData && audioItem.timingData.words) {
+        words = (audioItem.timingData.words || []).map((w: any) => String(w));
+        wtimes = (
+          audioItem.timingData.word_times || audioItem.timingData.wtimes || []
+        ).map((t: any) => Number(t));
+        wdurations = (
+          audioItem.timingData.word_durations ||
+          audioItem.timingData.wdurations ||
+          []
+        ).map((d: any) => Number(d));
+      }
+
+      // Keep aligned arrays only.
+      const safeLen = Math.min(words.length, wtimes.length, wdurations.length);
+      words = words.slice(0, safeLen);
+      wtimes = wtimes.slice(0, safeLen);
+      wdurations = wdurations.slice(0, safeLen);
+
+      if (headRef.current && words.length > 0) {
+        console.log(`👄 Lip-syncing ${words.length} words...`);
+        console.log('👄 Lip-sync data:', {
+          firstWord: words[0],
+          startTime: wtimes[0],
+          duration: wdurations[0]
+        });
+
+        // Compatibility: TalkingHead builds differ in speakAudio signature.
+        // Try object-form first (v1.4 examples), then fallback to 2-arg form.
+        let started = false;
+        try {
+          headRef.current.speakAudio({
+            audio: audioItem.buffer,
+            words: words,
+            wtimes: wtimes,
+            wdurations: wdurations
+          });
+          started = true;
+        } catch (errObjectForm) {
+          console.warn('speakAudio object-form failed, trying 2-arg form', errObjectForm);
+          try {
+            headRef.current.speakAudio(audioItem.buffer, {
+              words: words,
+              wtimes: wtimes,
+              wdurations: wdurations
+            });
+            started = true;
+          } catch (errTwoArg) {
+            console.error('Both speakAudio signatures failed:', errTwoArg);
+          }
+        }
+
+        if (!started) {
+          throw new Error('Unable to start TalkingHead speakAudio playback');
+        }
 
         // Set timer for next audio
         setTimeout(() => {
-          console.log('TalkingHead audio finished, playing next...');
           playNextAudio();
         }, audioItem.duration * 1000);
       } else if (headRef.current) {
-        // Basic TalkingHead audio without timing
-        console.log('Using basic TalkingHead audio');
-        headRef.current.speakAudio({ audio: audioItem.buffer });
+        console.log('⚠️ No lip sync data found, playing audio only');
+
+        let started = false;
+        try {
+          headRef.current.speakAudio({ audio: audioItem.buffer });
+          started = true;
+        } catch (errObjectForm) {
+          console.warn(
+            'Audio-only object-form failed, trying single-arg buffer form',
+            errObjectForm
+          );
+          try {
+            headRef.current.speakAudio(audioItem.buffer);
+            started = true;
+          } catch (errSingleArg) {
+            console.error('Audio-only speakAudio failed:', errSingleArg);
+          }
+        }
+
+        if (!started) {
+          throw new Error('Unable to start TalkingHead audio-only playback');
+        }
 
         setTimeout(() => {
-          console.log('Basic TalkingHead audio finished, playing next...');
           playNextAudio();
         }, audioItem.duration * 1000);
       } else {
@@ -160,14 +234,12 @@ const TalkingHead: React.FC<TalkingHeadProps> = ({
         source.buffer = audioItem.buffer;
         source.connect(audioContextRef.current!.destination);
         source.onended = () => {
-          console.log('Web Audio finished, playing next...');
           playNextAudio();
         };
         source.start();
       }
     } catch (error) {
       console.error('Error playing audio:', error);
-      // Continue to next audio on error
       setTimeout(() => playNextAudio(), 100);
     }
   }, [initAudioContext]);

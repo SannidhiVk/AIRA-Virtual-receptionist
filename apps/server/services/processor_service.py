@@ -2,7 +2,7 @@ from core.config import logger
 
 WAKE_WORD_TRIGGER_TEXT = "WAKE_WORD_TRIGGERED"
 WAKE_WORD_GREETING = (
-    "Welcome to Sharp Software Development India Pvt. Ltd. "
+    "Welcome to Sharp Software Development India Private Limited. "
     "I am Jarvis, how can I assist you today?"
 )
 
