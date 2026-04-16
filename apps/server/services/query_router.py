@@ -45,18 +45,33 @@ def get_session_state(client_id: str) -> Dict[str, Any]:
     return _client_sessions[client_id]
 
 
-def clear_session_state(client_id: str, hard_reset: bool = False) -> None:
-    # Clear the local Python dictionary state
+def clear_session_state(client_id: str, retain_name=False) -> None:
+    old_state = _client_sessions.get(client_id, {})
+    
+    # 1. Reset the local Python state
     _client_sessions[client_id] = _fresh_state()
     
-    if hard_reset:
+    if retain_name:
+        # SOFT RESET: Keep the person's identity but clear the task
+        _client_sessions[client_id]["visitor_name"] = old_state.get("visitor_name")
+        _client_sessions[client_id]["visitor_email"] = old_state.get("visitor_email")
+        _client_sessions[client_id]["visitor_type"] = old_state.get("visitor_type")
+        _client_sessions[client_id]["meeting_with_raw"] = old_state.get("meeting_with_raw")
+        _client_sessions[client_id]["meeting_with_resolved"] = old_state.get("meeting_with_resolved")
+    else:
+        # HARD RESET: Wipe everything
         try:
-            # Wipe the LLM's long-term memory history
+            # A. Wipe LLM History
             GroqProcessor.get_instance().reset_history(client_id)
-            logger.info(f"Hard reset performed for {client_id}")
+            
+            # B. WIPE CLIENT CONTEXT (This stops the "Delhi engineers" leak)
+            from client_context import set_last_employee
+            # We overwrite the context with None/Empty values
+            set_last_employee(client_id, name=None, role=None, email=None, cabin=None, department=None)
+            
+            logger.info(f"Hard reset: Cleared session, LLM history, and Client Context for {client_id}")
         except Exception as e:
-            logger.error(f"Failed to reset LLM history: {e}")
-
+            logger.error(f"Error during hard reset: {e}")
 
 def _fresh_state() -> Dict[str, Any]:
     return {
