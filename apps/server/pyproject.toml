@@ -30,6 +30,8 @@ dependencies = [
     "google-auth-oauthlib",
     "openwakeword",
     "silero-vad",
+    "deepface>=0.0.93",
+    "tf-keras",
 ]
 
 [project.optional-dependencies]

@@ -1,7 +1,21 @@
 'use client';
 
-import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Camera, CameraOff, Move, Maximize2, Minimize2, X } from 'lucide-react';
+import React, {
+  useRef,
+  useEffect,
+  useState,
+  useCallback,
+  forwardRef,
+  useImperativeHandle,
+} from 'react';
+import { Camera, CameraOff, Maximize2, Minimize2, X } from 'lucide-react';
+
+// ── Public API exposed to parent via ref ───────────────────────────────────
+// Parent components call: cameraRef.current.captureFrame()
+// to grab one JPEG frame from the live webcam at any moment.
+export interface CameraStreamHandle {
+  captureFrame: () => string | null; // Returns base64 JPEG, or null if not streaming
+}
 
 interface CameraStreamProps {
   className?: string;
@@ -9,14 +23,17 @@ interface CameraStreamProps {
   onStreamChange?: (stream: MediaStream | null) => void;
 }
 
-const CameraStream: React.FC<CameraStreamProps> = ({
-  className = '',
-  onClose,
-  onStreamChange
-}) => {
+// forwardRef lets the parent hold a ref to this component and call captureFrame()
+const CameraStream = forwardRef<CameraStreamHandle, CameraStreamProps>(
+  function CameraStream(
+    { className = '', onClose, onStreamChange },
+    ref
+  ) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  // Hidden canvas used to grab a single frame from the live video
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const [isStreaming, setIsStreaming] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -59,6 +76,28 @@ const CameraStream: React.FC<CameraStreamProps> = ({
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
 
+  // ── captureFrame: grab ONE JPEG from the live video ───────────────────────
+  // HOW IT WORKS:
+  //   1. The <canvas> element is hidden but sized to the video's real dimensions
+  //   2. drawImage() copies the current video frame into the canvas
+  //   3. toDataURL('image/jpeg', 0.8) encodes it as a base64 JPEG string
+  //   4. That string is sent over WebSocket to the server for DeepFace analysis
+  // This all happens instantly (≈<5ms) — no latency visible to the user.
+  const captureFrame = useCallback((): string | null => {
+    if (!isStreaming || !videoRef.current || !canvasRef.current) return null;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    canvas.width = video.videoWidth || 320;
+    canvas.height = video.videoHeight || 240;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.8); // base64 string: "data:image/jpeg;base64,..."
+  }, [isStreaming]);
+
+  // Expose captureFrame() to parent via ref
+  useImperativeHandle(ref, () => ({ captureFrame }), [captureFrame]);
+
   // Get available camera devices
   const getDevices = useCallback(async () => {
     try {
@@ -75,7 +114,7 @@ const CameraStream: React.FC<CameraStreamProps> = ({
       console.error('Error getting devices:', error);
       setError('Failed to get camera devices');
     }
-  }, []); // Remove selectedDeviceId dependency
+  }, [selectedDeviceId]);
 
   // Start camera stream
   const startStream = useCallback(async () => {
@@ -101,9 +140,11 @@ const CameraStream: React.FC<CameraStreamProps> = ({
       }
 
       setIsStreaming(true);
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown camera error';
       console.error('Error starting camera:', error);
-      setError(`Failed to start camera: ${error.message}`);
+      setError(`Failed to start camera: ${message}`);
       setIsStreaming(false);
     }
   }, [selectedDeviceId]);
@@ -192,7 +233,7 @@ const CameraStream: React.FC<CameraStreamProps> = ({
   // Initialize devices on mount
   useEffect(() => {
     getDevices();
-  }, []); // Remove getDevices dependency
+  }, [getDevices]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -328,14 +369,21 @@ const CameraStream: React.FC<CameraStreamProps> = ({
           </div>
         )}
       </div>
+
+      {/* Hidden canvas — used only by captureFrame(), never shown to user */}
+      <canvas ref={canvasRef} className="hidden" aria-hidden="true" />
     </div>
   );
-};
+}); // end forwardRef
+
+CameraStream.displayName = 'CameraStream';
+
 
 // Floating Camera Toggle Button
 export const CameraToggleButton: React.FC<{
   onStreamChange?: (stream: MediaStream | null) => void;
-}> = ({ onStreamChange }) => {
+  cameraRef?: React.RefObject<CameraStreamHandle | null>;
+}> = ({ onStreamChange, cameraRef }) => {
   const [showCamera, setShowCamera] = useState(false);
 
   return (
@@ -354,6 +402,7 @@ export const CameraToggleButton: React.FC<{
 
       {showCamera && (
         <CameraStream
+          ref={cameraRef}
           onClose={() => setShowCamera(false)}
           onStreamChange={onStreamChange}
         />

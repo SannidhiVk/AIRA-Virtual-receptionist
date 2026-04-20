@@ -6,8 +6,10 @@ import time
 import io
 import os
 import wave
+import re
 import numpy as np
 import torch
+from concurrent.futures import ThreadPoolExecutor
 from silero_vad import load_silero_vad, get_speech_timestamps
 from fastapi import APIRouter, WebSocket
 from starlette.websockets import WebSocketDisconnect
@@ -17,6 +19,10 @@ from models.whisper_processor import WhisperProcessor
 from models.tts_processor import KokoroTTSProcessor
 from services.processor_service import process_text_for_client
 from services.wake_word_service import get_wake_word_service
+from services.face_recognition_service import verify_employee_face
+
+# Thread pool for running blocking DeepFace calls without blocking the async event loop
+_face_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="deepface")
 
 logging.basicConfig(
     level=logging.DEBUG, format="%(asctime)s[%(levelname)s] %(name)s: %(message)s"
@@ -36,6 +42,39 @@ OWW_CHUNK_BYTES = OWW_CHUNK_SAMPLES * 2
 SILERO_WINDOW_SAMPLES = 8000
 MAX_SILENCE_MS = 1200
 FOLLOWUP_TIMEOUT_SECONDS = float(os.getenv("FOLLOWUP_TIMEOUT", "12.0"))
+
+
+def _extract_spoken_name(text: str) -> str | None:
+    """
+    Try to extract a candidate name from phrases like:
+      - "I'm John Doe"
+      - "I am John Doe"
+      - "This is John Doe"
+      - "My name is John Doe"
+    """
+    if not text:
+        return None
+    patterns = [
+        r"\b(?:i am|i'm)\s+([a-zA-Z][a-zA-Z\s.'-]{1,60})",
+        r"\bmy name is\s+([a-zA-Z][a-zA-Z\s.'-]{1,60})",
+        r"\bthis is\s+([a-zA-Z][a-zA-Z\s.'-]{1,60})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).strip(" .,!?:;")
+    return None
+
+
+def _resolve_employee_name(candidate_name: str) -> str | None:
+    try:
+        from receptionist.database import get_employee_by_name
+        employee = get_employee_by_name(candidate_name)
+        if employee:
+            return employee.name
+    except Exception:
+        return None
+    return None
 
 
 def create_wav_from_pcm(pcm_bytes: bytes, sample_rate: int = SAMPLE_RATE) -> bytes:
@@ -121,6 +160,50 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 if raw_text:
                     try:
                         msg = json.loads(raw_text)
+
+                        # ── Face verification request from frontend ──────────────
+                        # Triggered when the employee says their name and LLM identifies them.
+                        # Frontend sends: { type: "verify_face", audio_name: "John", image_b64: "..." }
+                        if msg.get("type") == "verify_face":
+                            audio_name = msg.get("audio_name", "")
+                            image_b64 = msg.get("image_b64", "")
+                            logger.info(f"[{client_id}] Face verification requested for: '{audio_name}'")
+
+                            # Run DeepFace in a thread pool (it's blocking/CPU-intensive)
+                            loop = asyncio.get_event_loop()
+                            result = await loop.run_in_executor(
+                                _face_executor,
+                                verify_employee_face,
+                                audio_name,
+                                image_b64,
+                            )
+
+                            logger.info(
+                                f"[{client_id}] Face verify result for '{audio_name}': "
+                                f"verified={result['verified']}, distance={result['distance']}"
+                            )
+
+                            # Send result back to frontend (for the UI badge)
+                            await websocket.send_text(json.dumps({
+                                "type": "face_verification_result",
+                                "verified": result["verified"],
+                                "distance": result["distance"],
+                                "audio_name": audio_name,
+                                "has_photo": result["has_photo"],
+                                "message": result.get("message", ""),
+                            }))
+
+                            # If verification FAILED and there WAS a photo to compare against,
+                            # queue Jarvis to verbally challenge the person.
+                            if not result["verified"] and result["has_photo"] and result["message"]:
+                                logger.info(
+                                    f"[{client_id}] Face mismatch — queueing verbal challenge for '{audio_name}'"
+                                )
+                                await text_queue.put(result["message"])
+
+                            continue
+
+                        # ── Stop-speaking control message ────────────────────────
                         if msg.get("action") == "stop_speaking":
                             session_state["mode"] = "PASSIVE"
                             await websocket.send_text(json.dumps({"state": "passive"}))
@@ -218,6 +301,23 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                 )
 
                                 if text and text not in ("NOISE_DETECTED", "NO_SPEECH"):
+                                    # If we can confidently resolve an employee name from
+                                    # what was spoken, notify frontend to trigger face check.
+                                    candidate = _extract_spoken_name(text)
+                                    if candidate:
+                                        loop = asyncio.get_event_loop()
+                                        employee_name = await loop.run_in_executor(
+                                            _face_executor, _resolve_employee_name, candidate
+                                        )
+                                        if employee_name:
+                                            await websocket.send_text(
+                                                json.dumps(
+                                                    {
+                                                        "type": "employee_identified",
+                                                        "name": employee_name,
+                                                    }
+                                                )
+                                            )
                                     await text_queue.put(text)
                                 else:
                                     session_state["mode"] = "PASSIVE"
