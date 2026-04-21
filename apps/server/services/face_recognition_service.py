@@ -77,7 +77,9 @@ def get_photo_path(employee_id: int) -> Path:
     return PHOTOS_DIR / f"{employee_id}.jpg"
 
 
-def _save_capture(image_b64: str, employee_name: str, verified: bool, distance: float) -> Optional[Path]:
+def _save_capture(
+    image_b64: str, employee_name: str, verified: bool, distance: float
+) -> Optional[Path]:
     """
     Save the live capture to CAPTURES_DIR for cross-verification.
     Filename format: <timestamp>_<employee>_<result>_d<distance>.jpg
@@ -203,12 +205,12 @@ def verify_employee_face(audio_name: str, image_b64: str) -> dict:
 
         result = DeepFace.verify(
             img1_path=str(stored_photo_path),  # Employee's stored photo from DB
-            img2_path=tmp_path,                # Live capture from webcam
-            model_name=MODEL_NAME,             # Facenet512 — higher accuracy than Facenet128
-            detector_backend=DETECTOR_BACKEND, # Configurable via env var
-            enforce_detection=False,           # Don't crash if face isn't perfectly detected
-            distance_metric="cosine",          # Works well with Facenet family
-            align=True,                        # Face alignment greatly improves accuracy
+            img2_path=tmp_path,  # Live capture from webcam
+            model_name=MODEL_NAME,  # Facenet512 — higher accuracy than Facenet128
+            detector_backend=DETECTOR_BACKEND,  # Configurable via env var
+            enforce_detection=False,  # Don't crash if face isn't perfectly detected
+            distance_metric="cosine",  # Works well with Facenet family
+            align=True,  # Face alignment greatly improves accuracy
         )
 
         verified: bool = result.get("verified", False)
@@ -272,7 +274,9 @@ def verify_employee_face(audio_name: str, image_b64: str) -> dict:
         }
 
     except Exception as e:
-        logger.error("DeepFace verification failed for '%s': %s", audio_name, e, exc_info=True)
+        logger.error(
+            "DeepFace verification failed for '%s': %s", audio_name, e, exc_info=True
+        )
         # Save the raw capture even on error so you can inspect it
         _save_capture(image_b64, audio_name, False, -1.0)
         # On any unexpected error, be permissive — don't block the employee

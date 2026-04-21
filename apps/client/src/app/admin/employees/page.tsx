@@ -73,8 +73,8 @@ export default function EmployeeAdminPage() {
       const response = await fetch(
         `${API_BASE_URL}/api/employees/${employeeId}/photo`,
         {
-        method: 'POST',
-        body: form
+          method: 'POST',
+          body: form
         }
       );
       if (!response.ok) {
@@ -196,7 +196,9 @@ export default function EmployeeAdminPage() {
         </h2>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-600">
           <li>Upload right after creating a new employee profile.</li>
-          <li>Re-upload when appearance changes or recognition quality drops.</li>
+          <li>
+            Re-upload when appearance changes or recognition quality drops.
+          </li>
           <li>Use this page only for employees, not visitor check-ins.</li>
         </ul>
       </section>

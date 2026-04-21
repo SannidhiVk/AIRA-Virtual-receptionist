@@ -29,7 +29,9 @@ export function useFaceVerification(
     null
   );
   const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clearCameraErrorRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearCameraErrorRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
   const {
     onVerificationResult,
     sendFaceVerificationRequest,

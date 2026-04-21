@@ -162,9 +162,8 @@ const CameraStream = forwardRef<CameraStreamHandle, CameraStreamProps>(
       }
 
       try {
-        const fallbackStream = await navigator.mediaDevices.getUserMedia(
-          fallbackConstraints
-        );
+        const fallbackStream =
+          await navigator.mediaDevices.getUserMedia(fallbackConstraints);
         streamRef.current = fallbackStream;
 
         if (videoRef.current) {

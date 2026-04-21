@@ -17,8 +17,8 @@ export default function Home() {
   const { result, isVerifying, cameraStartupError } = useFaceVerification(
     cameraRef,
     {
-    ensureCameraReady: async () =>
-      (await cameraToggleRef.current?.ensureCameraReady()) ?? false
+      ensureCameraReady: async () =>
+        (await cameraToggleRef.current?.ensureCameraReady()) ?? false
     }
   );
 
