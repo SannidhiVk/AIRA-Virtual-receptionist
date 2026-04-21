@@ -21,8 +21,11 @@ export function useFaceVerification(
   const [isVerifying, setIsVerifying] = useState(false);
   const [result, setResult] = useState<FaceVerificationResult | null>(null);
   const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { onVerificationResult, sendFaceVerificationRequest, onEmployeeIdentified } =
-    useWebSocketContext();
+  const {
+    onVerificationResult,
+    sendFaceVerificationRequest,
+    onEmployeeIdentified
+  } = useWebSocketContext();
 
   // Listen for verification results from the backend
   useEffect(() => {
@@ -52,21 +55,24 @@ export function useFaceVerification(
     };
   }, [onVerificationResult]);
 
-
   const verifyFace = useCallback(
     (audioName: string) => {
       if (!cameraRef.current || !sendFaceVerificationRequest) {
-        console.warn("Face verification skipped: camera or websocket not ready.");
+        console.warn(
+          'Face verification skipped: camera or websocket not ready.'
+        );
         return;
       }
 
       console.log(`Verifying face for employee: ${audioName}`);
-      
+
       // 1. Capture the current frame from the camera as base64 JPEG
       const base64Image = cameraRef.current.captureFrame();
-      
+
       if (!base64Image) {
-        console.warn("Face verification failed: could not capture frame from camera.");
+        console.warn(
+          'Face verification failed: could not capture frame from camera.'
+        );
         return;
       }
 

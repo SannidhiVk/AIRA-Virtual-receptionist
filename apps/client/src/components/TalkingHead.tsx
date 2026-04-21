@@ -150,9 +150,16 @@ const TalkingHead: React.FC<TalkingHeadProps> = ({ className = '' }) => {
       let wdurations: number[] = [];
 
       // 1. Handle Array format (from Python backend)
-      if (Array.isArray(audioItem.timingData) && audioItem.timingData.length > 0) {
+      if (
+        Array.isArray(audioItem.timingData) &&
+        audioItem.timingData.length > 0
+      ) {
         audioItem.timingData.forEach((t: unknown) => {
-          const timing = t as { word?: unknown; start_time?: unknown; end_time?: unknown };
+          const timing = t as {
+            word?: unknown;
+            start_time?: unknown;
+            end_time?: unknown;
+          };
           if (
             timing.word &&
             timing.start_time !== undefined &&
@@ -160,19 +167,22 @@ const TalkingHead: React.FC<TalkingHeadProps> = ({ className = '' }) => {
           ) {
             words.push(String(timing.word));
             wtimes.push(Number(timing.start_time));
-            wdurations.push(Number(timing.end_time) - Number(timing.start_time));
+            wdurations.push(
+              Number(timing.end_time) - Number(timing.start_time)
+            );
           }
         });
       }
       // 2. Handle Object format (fallback)
-      else if (audioItem.timingData && typeof audioItem.timingData === 'object') {
+      else if (
+        audioItem.timingData &&
+        typeof audioItem.timingData === 'object'
+      ) {
         const timingObj = audioItem.timingData as TalkingHeadTimingObject;
         words = (timingObj.words || []).map((w: unknown) => String(w));
-        wtimes = (
-          timingObj.word_times ||
-          timingObj.wtimes ||
-          []
-        ).map((t: unknown) => Number(t));
+        wtimes = (timingObj.word_times || timingObj.wtimes || []).map(
+          (t: unknown) => Number(t)
+        );
         wdurations = (
           timingObj.word_durations ||
           timingObj.wdurations ||
@@ -419,7 +429,8 @@ const TalkingHead: React.FC<TalkingHeadProps> = ({ className = '' }) => {
           lipsyncLang: 'en'
         });
       } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : 'Unknown avatar error';
+        const message =
+          error instanceof Error ? error.message : 'Unknown avatar error';
         showStatus(`Failed to load avatar: ${message}`, 'error');
       }
     },
@@ -435,9 +446,11 @@ const TalkingHead: React.FC<TalkingHeadProps> = ({ className = '' }) => {
         setIsLoading(true);
         showStatus('Initializing avatar...', 'info');
 
-        const TalkingHeadCtor = (window as Window & {
-          TalkingHead?: new (...args: unknown[]) => TalkingHeadInstance;
-        }).TalkingHead;
+        const TalkingHeadCtor = (
+          window as Window & {
+            TalkingHead?: new (...args: unknown[]) => TalkingHeadInstance;
+          }
+        ).TalkingHead;
         if (!TalkingHeadCtor) {
           throw new Error('TalkingHead library not loaded');
         }
@@ -462,7 +475,9 @@ const TalkingHead: React.FC<TalkingHeadProps> = ({ className = '' }) => {
         connect();
       } catch (error: unknown) {
         const message =
-          error instanceof Error ? error.message : 'Unknown initialization error';
+          error instanceof Error
+            ? error.message
+            : 'Unknown initialization error';
         setIsLoading(false);
         showStatus(`Failed to initialize: ${message}`, 'error');
       }

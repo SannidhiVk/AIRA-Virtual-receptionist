@@ -43,9 +43,7 @@ export default function Home() {
       </div>
 
       {/* Floating Camera Component */}
-      <CameraToggleButton
-        cameraRef={cameraRef}
-      />
+      <CameraToggleButton cameraRef={cameraRef} />
 
       {/* Face verification badge */}
       {(isVerifying || result) && (

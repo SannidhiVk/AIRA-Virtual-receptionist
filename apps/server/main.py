@@ -69,11 +69,15 @@ async def reset_session(client_id: str):
 # Include routes after dispatcher is defined
 from routes.api_routes import router as api_router
 from routes.websocket_routes import router as websocket_router
-from routes.employee_routes import router as employee_router  # Employee photo upload API
+from routes.employee_routes import (
+    router as employee_router,
+)  # Employee photo upload API
 
 app.include_router(api_router)
 app.include_router(websocket_router)
-app.include_router(employee_router, prefix="/api")  # Registers GET/POST /api/employees/*
+app.include_router(
+    employee_router, prefix="/api"
+)  # Registers GET/POST /api/employees/*
 
 
 def main():

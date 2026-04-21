@@ -35,7 +35,9 @@ logger = logging.getLogger(__name__)
 FACENET_THRESHOLD = float(os.getenv("FACE_VERIFY_THRESHOLD", "0.40"))
 
 # Photo storage root — relative to this file's location (apps/server/)
-PHOTOS_DIR = Path(__file__).resolve().parent.parent / "receptionist" / "photos" / "employees"
+PHOTOS_DIR = (
+    Path(__file__).resolve().parent.parent / "receptionist" / "photos" / "employees"
+)
 
 
 def _ensure_photos_dir() -> None:
@@ -99,7 +101,7 @@ def verify_employee_face(audio_name: str, image_b64: str) -> dict:
     if not employee:
         logger.warning("Face verify: employee '%s' not found in DB.", audio_name)
         return {
-            "verified": True,   # Can't verify → don't block the flow
+            "verified": True,  # Can't verify → don't block the flow
             "distance": -1.0,
             "message": "",
             "has_photo": False,
@@ -115,7 +117,7 @@ def verify_employee_face(audio_name: str, image_b64: str) -> dict:
             audio_name,
         )
         return {
-            "verified": True,   # No photo to compare → don't block
+            "verified": True,  # No photo to compare → don't block
             "distance": -1.0,
             "message": "",
             "has_photo": False,
@@ -126,7 +128,7 @@ def verify_employee_face(audio_name: str, image_b64: str) -> dict:
     tmp_path = decode_b64_to_tempfile(image_b64)
     if not tmp_path:
         return {
-            "verified": True,   # Decode failure → don't block
+            "verified": True,  # Decode failure → don't block
             "distance": -1.0,
             "message": "",
             "has_photo": True,
@@ -138,12 +140,12 @@ def verify_employee_face(audio_name: str, image_b64: str) -> dict:
         from deepface import DeepFace  # Lazy import — only loaded when first used
 
         result = DeepFace.verify(
-            img1_path=str(stored_photo_path),   # Employee's stored photo from DB
-            img2_path=tmp_path,                  # Live capture from webcam
-            model_name="Facenet",                # Best accuracy/speed tradeoff on CPU
-            detector_backend="opencv",           # Fastest detector, good enough for frontal faces
-            enforce_detection=False,             # Don't crash if face isn't perfectly detected
-            distance_metric="cosine",            # Works well with Facenet
+            img1_path=str(stored_photo_path),  # Employee's stored photo from DB
+            img2_path=tmp_path,  # Live capture from webcam
+            model_name="Facenet",  # Best accuracy/speed tradeoff on CPU
+            detector_backend="opencv",  # Fastest detector, good enough for frontal faces
+            enforce_detection=False,  # Don't crash if face isn't perfectly detected
+            distance_metric="cosine",  # Works well with Facenet
         )
 
         verified: bool = result.get("verified", False)
@@ -155,7 +157,10 @@ def verify_employee_face(audio_name: str, image_b64: str) -> dict:
 
         logger.info(
             "Face verify for '%s': verified=%s, distance=%.4f (threshold=%.2f)",
-            audio_name, verified, distance, FACENET_THRESHOLD,
+            audio_name,
+            verified,
+            distance,
+            FACENET_THRESHOLD,
         )
 
         if verified:
@@ -202,6 +207,7 @@ def _get_employee_by_name(name: str):
     """
     try:
         from receptionist.database import get_employee_by_name
+
         return get_employee_by_name(name)
     except Exception as e:
         logger.error("DB lookup for employee '%s' failed: %s", name, e)

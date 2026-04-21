@@ -126,7 +126,9 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
   const faceVerificationResultCallbackRef = useRef<
     ((data: WebSocketMessage) => void) | null
   >(null);
-  const employeeIdentifiedCallbackRef = useRef<((employeeName: string) => void) | null>(null);
+  const employeeIdentifiedCallbackRef = useRef<
+    ((employeeName: string) => void) | null
+  >(null);
 
   const connect = useCallback(async () => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -167,7 +169,10 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
             faceVerificationResultCallbackRef.current?.(data);
           }
 
-          if (data.type === 'employee_identified' && typeof data.name === 'string') {
+          if (
+            data.type === 'employee_identified' &&
+            typeof data.name === 'string'
+          ) {
             employeeIdentifiedCallbackRef.current?.(data.name);
           }
 
@@ -306,25 +311,36 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
     []
   );
 
-  const sendFaceVerificationRequest = useCallback((audioName: string, imageB64: string) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'verify_face',
-        audio_name: audioName,
-        image_b64: imageB64
-      }));
-      console.log(`Sent face verification request for: ${audioName}`);
-    }
-  }, []);
+  const sendFaceVerificationRequest = useCallback(
+    (audioName: string, imageB64: string) => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: 'verify_face',
+            audio_name: audioName,
+            image_b64: imageB64
+          })
+        );
+        console.log(`Sent face verification request for: ${audioName}`);
+      }
+    },
+    []
+  );
 
   // Callback registration methods
-  const onVerificationResult = useCallback((callback: (data: WebSocketMessage) => void) => {
+  const onVerificationResult = useCallback(
+    (callback: (data: WebSocketMessage) => void) => {
       faceVerificationResultCallbackRef.current = callback;
-  }, []);
+    },
+    []
+  );
 
-  const onEmployeeIdentified = useCallback((callback: (employeeName: string) => void) => {
-    employeeIdentifiedCallbackRef.current = callback;
-  }, []);
+  const onEmployeeIdentified = useCallback(
+    (callback: (employeeName: string) => void) => {
+      employeeIdentifiedCallbackRef.current = callback;
+    },
+    []
+  );
 
   const onAudioReceived = useCallback(
     (

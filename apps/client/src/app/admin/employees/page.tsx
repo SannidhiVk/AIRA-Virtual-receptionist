@@ -31,7 +31,9 @@ export default function EmployeeAdminPage() {
       setEmployees(data);
     } catch (err: unknown) {
       const message =
-        err instanceof Error ? err.message : 'Unknown error while loading employees';
+        err instanceof Error
+          ? err.message
+          : 'Unknown error while loading employees';
       setError(message);
     } finally {
       setLoading(false);
@@ -66,7 +68,8 @@ export default function EmployeeAdminPage() {
       }
       await fetchEmployees();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Photo upload failed';
+      const message =
+        err instanceof Error ? err.message : 'Photo upload failed';
       setError(message);
     } finally {
       setUploadingId(null);
@@ -105,8 +108,12 @@ export default function EmployeeAdminPage() {
               {employees.map((employee) => (
                 <tr key={employee.id} className="border-t">
                   <td className="px-4 py-3">
-                    <div className="font-medium text-gray-900">{employee.name}</div>
-                    <div className="text-xs text-gray-500">{employee.email ?? '-'}</div>
+                    <div className="font-medium text-gray-900">
+                      {employee.name}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {employee.email ?? '-'}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-gray-700">
                     {employee.department || employee.role || '-'}
@@ -140,13 +147,17 @@ export default function EmployeeAdminPage() {
                   </td>
                   <td className="px-4 py-3">
                     <label className="inline-flex cursor-pointer items-center rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700">
-                      {uploadingId === employee.id ? 'Uploading...' : 'Upload Photo'}
+                      {uploadingId === employee.id
+                        ? 'Uploading...'
+                        : 'Upload Photo'}
                       <input
                         type="file"
                         accept="image/*"
                         className="hidden"
                         disabled={uploadingId === employee.id}
-                        onChange={(event) => void handlePhotoUpload(employee.id, event)}
+                        onChange={(event) =>
+                          void handlePhotoUpload(employee.id, event)
+                        }
                       />
                     </label>
                   </td>

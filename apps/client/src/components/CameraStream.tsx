@@ -6,7 +6,7 @@ import React, {
   useState,
   useCallback,
   forwardRef,
-  useImperativeHandle,
+  useImperativeHandle
 } from 'react';
 import { Camera, CameraOff, Maximize2, Minimize2, X } from 'lucide-react';
 
@@ -25,359 +25,358 @@ interface CameraStreamProps {
 
 // forwardRef lets the parent hold a ref to this component and call captureFrame()
 const CameraStream = forwardRef<CameraStreamHandle, CameraStreamProps>(
-  function CameraStream(
-    { className = '', onClose, onStreamChange },
-    ref
-  ) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  // Hidden canvas used to grab a single frame from the live video
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  function CameraStream({ className = '', onClose, onStreamChange }, ref) {
+    const videoRef = useRef<HTMLVideoElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+    const streamRef = useRef<MediaStream | null>(null);
+    // Hidden canvas used to grab a single frame from the live video
+    const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [isVisible, setIsVisible] = useState(true);
-  const [isDragging, setIsDragging] = useState(false);
+    const [isStreaming, setIsStreaming] = useState(false);
+    const [isExpanded, setIsExpanded] = useState(false);
+    const [isVisible, setIsVisible] = useState(true);
+    const [isDragging, setIsDragging] = useState(false);
 
-  // Calculate initial position
-  const getInitialPosition = useCallback(() => {
-    if (typeof window === 'undefined') return { x: 0, y: 0 };
+    // Calculate initial position
+    const getInitialPosition = useCallback(() => {
+      if (typeof window === 'undefined') return { x: 0, y: 0 };
 
-    const cameraWidth = isExpanded ? 400 : 200;
-    const cameraHeight = isExpanded ? 300 : 150;
-    const padding = 20;
-
-    return {
-      x: window.innerWidth - cameraWidth - padding,
-      y: window.innerHeight - cameraHeight - padding
-    };
-  }, [isExpanded]);
-
-  const [position, setPosition] = useState(getInitialPosition);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-
-  // Adjust position when expanding/contracting
-  const adjustPositionForSize = useCallback((newIsExpanded: boolean) => {
-    setPosition((current) => {
-      const newWidth = newIsExpanded ? 400 : 200;
-      const newHeight = newIsExpanded ? 300 : 150;
-      const maxX = window.innerWidth - newWidth - 20;
-      const maxY = window.innerHeight - newHeight - 20;
+      const cameraWidth = isExpanded ? 400 : 200;
+      const cameraHeight = isExpanded ? 300 : 150;
+      const padding = 20;
 
       return {
-        x: Math.max(0, Math.min(maxX, current.x)),
-        y: Math.max(0, Math.min(maxY, current.y))
+        x: window.innerWidth - cameraWidth - padding,
+        y: window.innerHeight - cameraHeight - padding
       };
-    });
-  }, []);
+    }, [isExpanded]);
 
-  const [error, setError] = useState<string | null>(null);
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
+    const [position, setPosition] = useState(getInitialPosition);
+    const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
-  // ── captureFrame: grab ONE JPEG from the live video ───────────────────────
-  // HOW IT WORKS:
-  //   1. The <canvas> element is hidden but sized to the video's real dimensions
-  //   2. drawImage() copies the current video frame into the canvas
-  //   3. toDataURL('image/jpeg', 0.8) encodes it as a base64 JPEG string
-  //   4. That string is sent over WebSocket to the server for DeepFace analysis
-  // This all happens instantly (≈<5ms) — no latency visible to the user.
-  const captureFrame = useCallback((): string | null => {
-    if (!isStreaming || !videoRef.current || !canvasRef.current) return null;
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    canvas.width = video.videoWidth || 320;
-    canvas.height = video.videoHeight || 240;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL('image/jpeg', 0.8); // base64 string: "data:image/jpeg;base64,..."
-  }, [isStreaming]);
+    // Adjust position when expanding/contracting
+    const adjustPositionForSize = useCallback((newIsExpanded: boolean) => {
+      setPosition((current) => {
+        const newWidth = newIsExpanded ? 400 : 200;
+        const newHeight = newIsExpanded ? 300 : 150;
+        const maxX = window.innerWidth - newWidth - 20;
+        const maxY = window.innerHeight - newHeight - 20;
 
-  // Expose captureFrame() to parent via ref
-  useImperativeHandle(ref, () => ({ captureFrame }), [captureFrame]);
+        return {
+          x: Math.max(0, Math.min(maxX, current.x)),
+          y: Math.max(0, Math.min(maxY, current.y))
+        };
+      });
+    }, []);
 
-  // Get available camera devices
-  const getDevices = useCallback(async () => {
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoDevices = devices.filter(
-        (device) => device.kind === 'videoinput'
-      );
-      setDevices(videoDevices);
+    const [error, setError] = useState<string | null>(null);
+    const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+    const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
 
-      if (videoDevices.length > 0 && !selectedDeviceId) {
-        setSelectedDeviceId(videoDevices[0].deviceId);
+    // ── captureFrame: grab ONE JPEG from the live video ───────────────────────
+    // HOW IT WORKS:
+    //   1. The <canvas> element is hidden but sized to the video's real dimensions
+    //   2. drawImage() copies the current video frame into the canvas
+    //   3. toDataURL('image/jpeg', 0.8) encodes it as a base64 JPEG string
+    //   4. That string is sent over WebSocket to the server for DeepFace analysis
+    // This all happens instantly (≈<5ms) — no latency visible to the user.
+    const captureFrame = useCallback((): string | null => {
+      if (!isStreaming || !videoRef.current || !canvasRef.current) return null;
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      canvas.width = video.videoWidth || 320;
+      canvas.height = video.videoHeight || 240;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL('image/jpeg', 0.8); // base64 string: "data:image/jpeg;base64,..."
+    }, [isStreaming]);
+
+    // Expose captureFrame() to parent via ref
+    useImperativeHandle(ref, () => ({ captureFrame }), [captureFrame]);
+
+    // Get available camera devices
+    const getDevices = useCallback(async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(
+          (device) => device.kind === 'videoinput'
+        );
+        setDevices(videoDevices);
+
+        if (videoDevices.length > 0 && !selectedDeviceId) {
+          setSelectedDeviceId(videoDevices[0].deviceId);
+        }
+      } catch (error) {
+        console.error('Error getting devices:', error);
+        setError('Failed to get camera devices');
       }
-    } catch (error) {
-      console.error('Error getting devices:', error);
-      setError('Failed to get camera devices');
-    }
-  }, [selectedDeviceId]);
+    }, [selectedDeviceId]);
 
-  // Start camera stream
-  const startStream = useCallback(async () => {
-    try {
-      setError(null);
+    // Start camera stream
+    const startStream = useCallback(async () => {
+      try {
+        setError(null);
 
-      const constraints: MediaStreamConstraints = {
-        video: {
-          deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
-          width: { ideal: 320 },
-          height: { ideal: 240 },
-          frameRate: { ideal: 30 }
-        },
-        audio: false
-      };
+        const constraints: MediaStreamConstraints = {
+          video: {
+            deviceId: selectedDeviceId
+              ? { exact: selectedDeviceId }
+              : undefined,
+            width: { ideal: 320 },
+            height: { ideal: 240 },
+            frameRate: { ideal: 30 }
+          },
+          audio: false
+        };
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      streamRef.current = stream;
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        streamRef.current = stream;
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play();
+        }
+
+        setIsStreaming(true);
+      } catch (error: unknown) {
+        const message =
+          error instanceof Error ? error.message : 'Unknown camera error';
+        console.error('Error starting camera:', error);
+        setError(`Failed to start camera: ${message}`);
+        setIsStreaming(false);
+      }
+    }, [selectedDeviceId]);
+
+    // Stop camera stream
+    const stopStream = useCallback(() => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
 
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
+        videoRef.current.srcObject = null;
       }
 
-      setIsStreaming(true);
-    } catch (error: unknown) {
-      const message =
-        error instanceof Error ? error.message : 'Unknown camera error';
-      console.error('Error starting camera:', error);
-      setError(`Failed to start camera: ${message}`);
       setIsStreaming(false);
-    }
-  }, [selectedDeviceId]);
+    }, []);
 
-  // Stop camera stream
-  const stopStream = useCallback(() => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-
-    setIsStreaming(false);
-  }, []);
-
-  // Toggle camera
-  const toggleCamera = useCallback(() => {
-    if (isStreaming) {
-      stopStream();
-    } else {
-      startStream();
-    }
-  }, [isStreaming, startStream, stopStream]);
-
-  // Notify parent of stream changes
-  useEffect(() => {
-    if (onStreamChange) {
-      onStreamChange(isStreaming ? streamRef.current : null);
-    }
-  }, [isStreaming, onStreamChange]);
-
-  // Mouse down handler for dragging
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (!containerRef.current) return;
-
-    const rect = containerRef.current.getBoundingClientRect();
-    setDragOffset({
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top
-    });
-    setIsDragging(true);
-    e.preventDefault();
-  }, []);
-
-  // Mouse move handler for dragging
-  const handleMouseMove = useCallback(
-    (e: MouseEvent) => {
-      if (!isDragging) return;
-
-      requestAnimationFrame(() => {
-        const newX = e.clientX - dragOffset.x;
-        const newY = e.clientY - dragOffset.y;
-
-        const maxX = window.innerWidth - (isExpanded ? 400 : 200);
-        const maxY = window.innerHeight - (isExpanded ? 300 : 150);
-
-        setPosition({
-          x: Math.max(0, Math.min(maxX, newX)),
-          y: Math.max(0, Math.min(maxY, newY))
-        });
-      });
-    },
-    [isDragging, dragOffset, isExpanded]
-  );
-
-  // Mouse up handler for dragging
-  const handleMouseUp = useCallback(() => {
-    setIsDragging(false);
-  }, []);
-
-  // Update position when window resizes
-  useEffect(() => {
-    const handleResize = () => {
-      if (!isDragging) {
-        setPosition(getInitialPosition());
+    // Toggle camera
+    const toggleCamera = useCallback(() => {
+      if (isStreaming) {
+        stopStream();
+      } else {
+        startStream();
       }
-    };
+    }, [isStreaming, startStream, stopStream]);
 
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [isDragging, getInitialPosition]);
+    // Notify parent of stream changes
+    useEffect(() => {
+      if (onStreamChange) {
+        onStreamChange(isStreaming ? streamRef.current : null);
+      }
+    }, [isStreaming, onStreamChange]);
 
-  // Initialize devices on mount
-  useEffect(() => {
-    getDevices();
-  }, [getDevices]);
+    // Mouse down handler for dragging
+    const handleMouseDown = useCallback((e: React.MouseEvent) => {
+      if (!containerRef.current) return;
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      stopStream();
-    };
-  }, [stopStream]);
+      const rect = containerRef.current.getBoundingClientRect();
+      setDragOffset({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      });
+      setIsDragging(true);
+      e.preventDefault();
+    }, []);
 
-  // Add/remove mouse event listeners for dragging
-  useEffect(() => {
-    if (isDragging) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
+    // Mouse move handler for dragging
+    const handleMouseMove = useCallback(
+      (e: MouseEvent) => {
+        if (!isDragging) return;
 
-      return () => {
-        document.removeEventListener('mousemove', handleMouseMove);
-        document.removeEventListener('mouseup', handleMouseUp);
+        requestAnimationFrame(() => {
+          const newX = e.clientX - dragOffset.x;
+          const newY = e.clientY - dragOffset.y;
+
+          const maxX = window.innerWidth - (isExpanded ? 400 : 200);
+          const maxY = window.innerHeight - (isExpanded ? 300 : 150);
+
+          setPosition({
+            x: Math.max(0, Math.min(maxX, newX)),
+            y: Math.max(0, Math.min(maxY, newY))
+          });
+        });
+      },
+      [isDragging, dragOffset, isExpanded]
+    );
+
+    // Mouse up handler for dragging
+    const handleMouseUp = useCallback(() => {
+      setIsDragging(false);
+    }, []);
+
+    // Update position when window resizes
+    useEffect(() => {
+      const handleResize = () => {
+        if (!isDragging) {
+          setPosition(getInitialPosition());
+        }
       };
-    }
-  }, [isDragging, handleMouseMove, handleMouseUp]);
 
-  if (!isVisible) return null;
+      window.addEventListener('resize', handleResize);
+      return () => window.removeEventListener('resize', handleResize);
+    }, [isDragging, getInitialPosition]);
 
-  return (
-    <div
-      ref={containerRef}
-      className={`fixed z-50 overflow-hidden rounded-lg bg-white shadow-2xl ${
-        isExpanded ? 'h-72 w-96' : 'h-36 w-48'
-      } ${isDragging ? 'cursor-grabbing' : 'cursor-grab'} ${
-        isDragging ? '' : 'transition-all duration-200'
-      } ${className}`}
-      style={{
-        left: `${position.x}px`,
-        top: `${position.y}px`,
-        border: '2px solid #e5e7eb',
-        transform: isDragging ? 'none' : undefined
-      }}
-    >
-      {/* Header */}
+    // Initialize devices on mount
+    useEffect(() => {
+      getDevices();
+    }, [getDevices]);
+
+    // Cleanup on unmount
+    useEffect(() => {
+      return () => {
+        stopStream();
+      };
+    }, [stopStream]);
+
+    // Add/remove mouse event listeners for dragging
+    useEffect(() => {
+      if (isDragging) {
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+
+        return () => {
+          document.removeEventListener('mousemove', handleMouseMove);
+          document.removeEventListener('mouseup', handleMouseUp);
+        };
+      }
+    }, [isDragging, handleMouseMove, handleMouseUp]);
+
+    if (!isVisible) return null;
+
+    return (
       <div
-        className="flex cursor-grab items-center justify-between bg-gray-800 p-2 text-white active:cursor-grabbing"
-        onMouseDown={handleMouseDown}
+        ref={containerRef}
+        className={`fixed z-50 overflow-hidden rounded-lg bg-white shadow-2xl ${
+          isExpanded ? 'h-72 w-96' : 'h-36 w-48'
+        } ${isDragging ? 'cursor-grabbing' : 'cursor-grab'} ${
+          isDragging ? '' : 'transition-all duration-200'
+        } ${className}`}
+        style={{
+          left: `${position.x}px`,
+          top: `${position.y}px`,
+          border: '2px solid #e5e7eb',
+          transform: isDragging ? 'none' : undefined
+        }}
       >
-        <div className="flex items-center space-x-2">
-          <Camera size={16} />
-          <span className="text-sm font-medium">Camera</span>
-        </div>
-
-        <div className="flex items-center space-x-1">
-          <button
-            onClick={toggleCamera}
-            className="rounded p-1 hover:bg-gray-700"
-            title={isStreaming ? 'Stop Camera' : 'Start Camera'}
-          >
-            {isStreaming ? <CameraOff size={14} /> : <Camera size={14} />}
-          </button>
-
-          <button
-            onClick={() => {
-              const newExpanded = !isExpanded;
-              adjustPositionForSize(newExpanded);
-              setIsExpanded(newExpanded);
-            }}
-            className="rounded p-1 hover:bg-gray-700"
-            title={isExpanded ? 'Minimize' : 'Maximize'}
-          >
-            {isExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-          </button>
-
-          <button
-            onClick={() => (onClose ? onClose() : setIsVisible(false))}
-            className="rounded p-1 hover:bg-gray-700"
-            title="Close"
-          >
-            <X size={14} />
-          </button>
-        </div>
-      </div>
-
-      {/* Video Display */}
-      <div className="relative h-full bg-black">
-        <video
-          ref={videoRef}
-          className="h-full w-full object-cover"
-          playsInline
-          muted
-          autoPlay
-        />
-
-        {/* Overlay when not streaming */}
-        {!isStreaming && (
-          <div className="bg-opacity-75 absolute inset-0 flex items-center justify-center bg-gray-900">
-            <div className="text-center text-white">
-              <CameraOff
-                size={isExpanded ? 32 : 24}
-                className="mx-auto mb-1 opacity-50"
-              />
-              <p className="text-xs">Camera Off</p>
-            </div>
+        {/* Header */}
+        <div
+          className="flex cursor-grab items-center justify-between bg-gray-800 p-2 text-white active:cursor-grabbing"
+          onMouseDown={handleMouseDown}
+        >
+          <div className="flex items-center space-x-2">
+            <Camera size={16} />
+            <span className="text-sm font-medium">Camera</span>
           </div>
-        )}
 
-        {/* Status indicator */}
-        {isStreaming && (
-          <div className="absolute top-1 left-1 flex items-center space-x-1 rounded-full bg-red-500 px-1 py-0.5 text-xs text-white">
-            <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-white"></div>
-            <span className="text-xs">LIVE</span>
-          </div>
-        )}
-
-        {/* Error Display */}
-        {error && (
-          <div className="absolute right-1 bottom-1 left-1 rounded bg-red-500 p-1 text-xs text-white">
-            {error}
-          </div>
-        )}
-
-        {/* Camera Switch */}
-        {isExpanded && devices.length > 1 && (
-          <div className="absolute right-1 bottom-1">
-            <select
-              value={selectedDeviceId}
-              onChange={(e) => setSelectedDeviceId(e.target.value)}
-              className="bg-opacity-50 rounded border-none bg-black p-1 text-xs text-white"
-              disabled={isStreaming}
+          <div className="flex items-center space-x-1">
+            <button
+              onClick={toggleCamera}
+              className="rounded p-1 hover:bg-gray-700"
+              title={isStreaming ? 'Stop Camera' : 'Start Camera'}
             >
-              {devices.map((device, index) => (
-                <option key={device.deviceId} value={device.deviceId}>
-                  {device.label || `Camera ${index + 1}`}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-      </div>
+              {isStreaming ? <CameraOff size={14} /> : <Camera size={14} />}
+            </button>
 
-      {/* Hidden canvas — used only by captureFrame(), never shown to user */}
-      <canvas ref={canvasRef} className="hidden" aria-hidden="true" />
-    </div>
-  );
-}); // end forwardRef
+            <button
+              onClick={() => {
+                const newExpanded = !isExpanded;
+                adjustPositionForSize(newExpanded);
+                setIsExpanded(newExpanded);
+              }}
+              className="rounded p-1 hover:bg-gray-700"
+              title={isExpanded ? 'Minimize' : 'Maximize'}
+            >
+              {isExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            </button>
+
+            <button
+              onClick={() => (onClose ? onClose() : setIsVisible(false))}
+              className="rounded p-1 hover:bg-gray-700"
+              title="Close"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+
+        {/* Video Display */}
+        <div className="relative h-full bg-black">
+          <video
+            ref={videoRef}
+            className="h-full w-full object-cover"
+            playsInline
+            muted
+            autoPlay
+          />
+
+          {/* Overlay when not streaming */}
+          {!isStreaming && (
+            <div className="bg-opacity-75 absolute inset-0 flex items-center justify-center bg-gray-900">
+              <div className="text-center text-white">
+                <CameraOff
+                  size={isExpanded ? 32 : 24}
+                  className="mx-auto mb-1 opacity-50"
+                />
+                <p className="text-xs">Camera Off</p>
+              </div>
+            </div>
+          )}
+
+          {/* Status indicator */}
+          {isStreaming && (
+            <div className="absolute top-1 left-1 flex items-center space-x-1 rounded-full bg-red-500 px-1 py-0.5 text-xs text-white">
+              <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-white"></div>
+              <span className="text-xs">LIVE</span>
+            </div>
+          )}
+
+          {/* Error Display */}
+          {error && (
+            <div className="absolute right-1 bottom-1 left-1 rounded bg-red-500 p-1 text-xs text-white">
+              {error}
+            </div>
+          )}
+
+          {/* Camera Switch */}
+          {isExpanded && devices.length > 1 && (
+            <div className="absolute right-1 bottom-1">
+              <select
+                value={selectedDeviceId}
+                onChange={(e) => setSelectedDeviceId(e.target.value)}
+                className="bg-opacity-50 rounded border-none bg-black p-1 text-xs text-white"
+                disabled={isStreaming}
+              >
+                {devices.map((device, index) => (
+                  <option key={device.deviceId} value={device.deviceId}>
+                    {device.label || `Camera ${index + 1}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
+        {/* Hidden canvas — used only by captureFrame(), never shown to user */}
+        <canvas ref={canvasRef} className="hidden" aria-hidden="true" />
+      </div>
+    );
+  }
+); // end forwardRef
 
 CameraStream.displayName = 'CameraStream';
-
 
 // Floating Camera Toggle Button
 export const CameraToggleButton: React.FC<{

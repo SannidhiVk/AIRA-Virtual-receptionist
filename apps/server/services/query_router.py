@@ -47,31 +47,41 @@ def get_session_state(client_id: str) -> Dict[str, Any]:
 
 def clear_session_state(client_id: str, retain_name=False) -> None:
     old_state = _client_sessions.get(client_id, {})
-    
+
     # 1. Reset the local Python state
     _client_sessions[client_id] = _fresh_state()
-    
+
     if retain_name:
         # SOFT RESET: Keep the person's identity but clear the task
         _client_sessions[client_id]["visitor_name"] = old_state.get("visitor_name")
         _client_sessions[client_id]["visitor_email"] = old_state.get("visitor_email")
         _client_sessions[client_id]["visitor_type"] = old_state.get("visitor_type")
-        _client_sessions[client_id]["meeting_with_raw"] = old_state.get("meeting_with_raw")
-        _client_sessions[client_id]["meeting_with_resolved"] = old_state.get("meeting_with_resolved")
+        _client_sessions[client_id]["meeting_with_raw"] = old_state.get(
+            "meeting_with_raw"
+        )
+        _client_sessions[client_id]["meeting_with_resolved"] = old_state.get(
+            "meeting_with_resolved"
+        )
     else:
         # HARD RESET: Wipe everything
         try:
             # A. Wipe LLM History
             GroqProcessor.get_instance().reset_history(client_id)
-            
+
             # B. WIPE CLIENT CONTEXT (This stops the "Delhi engineers" leak)
             from client_context import set_last_employee
+
             # We overwrite the context with None/Empty values
-            set_last_employee(client_id, name=None, role=None, email=None, cabin=None, department=None)
-            
-            logger.info(f"Hard reset: Cleared session, LLM history, and Client Context for {client_id}")
+            set_last_employee(
+                client_id, name=None, role=None, email=None, cabin=None, department=None
+            )
+
+            logger.info(
+                f"Hard reset: Cleared session, LLM history, and Client Context for {client_id}"
+            )
         except Exception as e:
             logger.error(f"Error during hard reset: {e}")
+
 
 def _fresh_state() -> Dict[str, Any]:
     return {
@@ -584,23 +594,27 @@ async def route_query(client_id: str, user_query: str) -> str:
 
     # 1. THE "HEY JARVIS" HARD RESET
     # Matches "Jarvis", "Hey Jarvis", "Hi Jarvis", etc., at the start of the string
-    wake_word_match = re.match(r"^(hey jarvis|hi jarvis|hello jarvis|jarvis)\b\s*,? ?(.*)", query_clean)
-    
+    wake_word_match = re.match(
+        r"^(hey jarvis|hi jarvis|hello jarvis|jarvis)\b\s*,? ?(.*)", query_clean
+    )
+
     if wake_word_match:
         # Perform a Hard Reset (Wipe session state AND LLM history)
-        clear_session_state(client_id, retain_name=False) 
+        clear_session_state(client_id, retain_name=False)
         # Note: clear_session_state inside your file calls GroqProcessor.reset_history
-        state = get_session_state(client_id) 
-        
+        state = get_session_state(client_id)
+
         # Capture text after the wake word (e.g., "I'm Sudha")
         remaining_text = wake_word_match.group(2).strip()
-        
+
         # If the user ONLY said the wake word, give a fresh greeting
         if not remaining_text:
             return await _llm_reply(
                 "The user just said your wake word. Greet them warmly and naturally as if they just walked up. "
                 "Do NOT use robotic greetings like 'Welcome to Sharp Software' and NEVER call them 'Visitor'.",
-                {}, None, client_id
+                {},
+                None,
+                client_id,
             )
         # Otherwise, replace the query with the remaining text and continue
         user_query = remaining_text
@@ -616,7 +630,9 @@ async def route_query(client_id: str, user_query: str) -> str:
 
     # 3. INTENT & ENTITY EXTRACTION
     extracted = await llm.extract_intent_and_entities(user_query)
-    entities, intent = extracted.get("entities", {}), extracted.get("intent", "general_conversation")
+    entities, intent = extracted.get("entities", {}), extracted.get(
+        "intent", "general_conversation"
+    )
 
     # 4. 30-MINUTE ARRIVAL PRIORITY
     # If they mention a time (e.g., "I'm here for my 3pm"), check if it's close to now.
@@ -629,11 +645,11 @@ async def route_query(client_id: str, user_query: str) -> str:
             state["scheduling_active"] = True
 
     # 5. THE GOODBYE SOFT RESET
-    # We catch goodbyes here. We don't wipe the memory yet so that if they 
+    # We catch goodbyes here. We don't wipe the memory yet so that if they
     # follow up immediately (like Sudha did), Jarvis still knows who they are.
     is_goodbye = re.search(
         r"\b(bye|goodbye|thank you|thanks|no thanks|see you|see ya|take care|that'?s all|i'?m done|have a good day)\b",
-        query_clean
+        query_clean,
     )
     if is_goodbye:
         response = await _llm_reply(
@@ -641,7 +657,7 @@ async def route_query(client_id: str, user_query: str) -> str:
             "Do not ask any follow-up questions.",
             {"visitor_name": state.get("visitor_name")},
             user_query,
-            client_id=client_id
+            client_id=client_id,
         )
         state["conv_state"] = State.COMPLETED
         return response
@@ -649,7 +665,10 @@ async def route_query(client_id: str, user_query: str) -> str:
     # 6. RE-START LOGIC
     # If they are starting a brand new check-in/schedule but we already have a name,
     # we treat it as a continuation or a fresh task for the same person.
-    if state["conv_state"] == State.COMPLETED and intent in ["check_in", "schedule_meeting"]:
+    if state["conv_state"] == State.COMPLETED and intent in [
+        "check_in",
+        "schedule_meeting",
+    ]:
         clear_session_state(client_id, retain_name=True)
         state = get_session_state(client_id)
 
@@ -657,7 +676,12 @@ async def route_query(client_id: str, user_query: str) -> str:
     _merge_checkin_entities(state, entities, client_id, user_query)
 
     if intent == "facility_request":
-        return await _llm_reply("Assure them you are pinging administration.", {"visitor_name": state.get("visitor_name")}, user_query, client_id)
+        return await _llm_reply(
+            "Assure them you are pinging administration.",
+            {"visitor_name": state.get("visitor_name")},
+            user_query,
+            client_id,
+        )
 
     if intent == "schedule_meeting":
         state["scheduling_active"] = True
@@ -666,13 +690,36 @@ async def route_query(client_id: str, user_query: str) -> str:
         return await _handle_scheduling(client_id, user_query, state, entities, intent)
 
     if intent == "employee_lookup":
-        target = _clean_entity(entities.get("employee_name")) or _clean_entity(entities.get("role"))
+        target = _clean_entity(entities.get("employee_name")) or _clean_entity(
+            entities.get("role")
+        )
         emp = _lookup_employee(target) if target else None
         if emp:
             from client_context import set_last_employee
-            set_last_employee(client_id, name=emp.name, role=emp.role, cabin=getattr(emp, "location", None))
-            return await llm.generate_grounded_response({"employee": {"name": emp.name, "role": emp.role, "cabin_number": getattr(emp, "location", "")}, "visitor_name": state.get("visitor_name")}, user_query)
-        return await _llm_reply(f"Apologize that you couldn't find '{target}'.", {"visitor_name": state.get("visitor_name")}, user_query, client_id)
+
+            set_last_employee(
+                client_id,
+                name=emp.name,
+                role=emp.role,
+                cabin=getattr(emp, "location", None),
+            )
+            return await llm.generate_grounded_response(
+                {
+                    "employee": {
+                        "name": emp.name,
+                        "role": emp.role,
+                        "cabin_number": getattr(emp, "location", ""),
+                    },
+                    "visitor_name": state.get("visitor_name"),
+                },
+                user_query,
+            )
+        return await _llm_reply(
+            f"Apologize that you couldn't find '{target}'.",
+            {"visitor_name": state.get("visitor_name")},
+            user_query,
+            client_id,
+        )
 
     if intent == "check_in" and state["conv_state"] != State.COMPLETED:
         return await _advance_checkin(state, user_query, client_id)
@@ -682,8 +729,9 @@ async def route_query(client_id: str, user_query: str) -> str:
     info = _get_full_company_info(state)
     if state["conv_state"] == State.COMPLETED:
         info["status"] = "Interaction finished, visitor is likely waiting or leaving."
-        
+
     return await llm.get_response(client_id, user_query, company_info=info)
+
 
 async def _advance_checkin(
     state: Dict[str, Any], user_query: str, client_id: str

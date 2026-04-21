@@ -69,6 +69,7 @@ def _extract_spoken_name(text: str) -> str | None:
 def _resolve_employee_name(candidate_name: str) -> str | None:
     try:
         from receptionist.database import get_employee_by_name
+
         employee = get_employee_by_name(candidate_name)
         if employee:
             return employee.name
@@ -167,7 +168,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         if msg.get("type") == "verify_face":
                             audio_name = msg.get("audio_name", "")
                             image_b64 = msg.get("image_b64", "")
-                            logger.info(f"[{client_id}] Face verification requested for: '{audio_name}'")
+                            logger.info(
+                                f"[{client_id}] Face verification requested for: '{audio_name}'"
+                            )
 
                             # Run DeepFace in a thread pool (it's blocking/CPU-intensive)
                             loop = asyncio.get_event_loop()
@@ -184,18 +187,26 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                             )
 
                             # Send result back to frontend (for the UI badge)
-                            await websocket.send_text(json.dumps({
-                                "type": "face_verification_result",
-                                "verified": result["verified"],
-                                "distance": result["distance"],
-                                "audio_name": audio_name,
-                                "has_photo": result["has_photo"],
-                                "message": result.get("message", ""),
-                            }))
+                            await websocket.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "face_verification_result",
+                                        "verified": result["verified"],
+                                        "distance": result["distance"],
+                                        "audio_name": audio_name,
+                                        "has_photo": result["has_photo"],
+                                        "message": result.get("message", ""),
+                                    }
+                                )
+                            )
 
                             # If verification FAILED and there WAS a photo to compare against,
                             # queue Jarvis to verbally challenge the person.
-                            if not result["verified"] and result["has_photo"] and result["message"]:
+                            if (
+                                not result["verified"]
+                                and result["has_photo"]
+                                and result["message"]
+                            ):
                                 logger.info(
                                     f"[{client_id}] Face mismatch — queueing verbal challenge for '{audio_name}'"
                                 )
@@ -307,7 +318,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                     if candidate:
                                         loop = asyncio.get_event_loop()
                                         employee_name = await loop.run_in_executor(
-                                            _face_executor, _resolve_employee_name, candidate
+                                            _face_executor,
+                                            _resolve_employee_name,
+                                            candidate,
                                         )
                                         if employee_name:
                                             await websocket.send_text(

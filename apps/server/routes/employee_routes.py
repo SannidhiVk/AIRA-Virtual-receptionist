@@ -35,13 +35,18 @@ from sqlalchemy.orm import Session
 
 from receptionist.database import SessionLocal
 from receptionist.models import Employee
-from services.face_recognition_service import PHOTOS_DIR, get_photo_path, _ensure_photos_dir
+from services.face_recognition_service import (
+    PHOTOS_DIR,
+    get_photo_path,
+    _ensure_photos_dir,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/employees", tags=["employees"])
 
 
 # ── DB session dependency ─────────────────────────────────────────────────────
+
 
 def get_db():
     """FastAPI dependency that provides a DB session and cleans up after."""
@@ -53,6 +58,7 @@ def get_db():
 
 
 # ── Pydantic response schema ──────────────────────────────────────────────────
+
 
 class EmployeeOut(BaseModel):
     id: int
@@ -68,6 +74,7 @@ class EmployeeOut(BaseModel):
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
+
 
 @router.get("/", response_model=List[EmployeeOut])
 def list_employees(db: Session = Depends(get_db)):
@@ -147,7 +154,9 @@ async def upload_employee_photo(
 
     logger.info(
         "Stored photo for employee %d (%s) at %s",
-        employee_id, employee.name, save_path,
+        employee_id,
+        employee.name,
+        save_path,
     )
 
     return {
