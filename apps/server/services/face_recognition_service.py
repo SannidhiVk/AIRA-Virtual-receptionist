@@ -9,45 +9,99 @@ HOW IT WORKS:
 2. That frame is sent as base64 over WebSocket with the spoken name.
 3. This service:
    a) Looks up the employee by name in the DB → gets their photo_path
-   b) Runs DeepFace.verify(stored_photo, live_frame) using the Facenet model
-   c) Returns a structured result: { verified, distance, message }
+   b) Runs DeepFace.verify(stored_photo, live_frame) using the Facenet512 model
+   c) Saves the live frame to a captures folder for cross-verification
+   d) Returns a structured result: { verified, distance, message }
 
-WHY DeepFace + Facenet:
+WHY DeepFace + Facenet512:
 - pip install only — no cmake/dlib build issues on Windows
-- Facenet gives ~97-98% accuracy, good for controlled office lighting
+- Facenet512 gives ~99.6% LFW accuracy, better than Facenet128
 - Works fully on CPU (no GPU needed)
 - enforce_detection=False = graceful fallback when face is partially out of frame
+- Captures are saved to receptionist/photos/captures/ so you can visually
+  inspect what the camera actually sent and compare against the stored photo.
+
+TROUBLESHOOTING distance ≈ 1.0 (guaranteed mismatch):
+- Distance of 1.082 (>1.0) means face was NOT detected in one or both images.
+  DeepFace then compares raw pixel embeddings → always huge distance.
+- Fix: ensure the stored photo and live frame both contain a clearly visible,
+  front-facing face. Check the saved captures in receptionist/photos/captures/.
+- Use FACE_VERIFY_DETECTOR env var to try 'retinaface' or 'mtcnn' for better
+  detection (slower but much more robust than default 'opencv').
 """
 
 import base64
 import logging
 import os
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 # ── Threshold tuning ──────────────────────────────────────────────────────────
-# Facenet distance: lower = more similar.
-# 0.40 is a good conservative threshold for office environments.
-# Raise to 0.50 if you get false mismatches (e.g. glasses, different lighting).
+# Facenet512 cosine distance: lower = more similar.
+# Default DeepFace threshold for Facenet512 cosine is ~0.30.
+# We use 0.40 to be tolerant of glasses / different lighting.
+# Raise to 0.50 if you still get false mismatches in your environment.
 FACENET_THRESHOLD = float(os.getenv("FACE_VERIFY_THRESHOLD", "0.40"))
+
+# Detector backend — opencv is fast but sometimes misses faces.
+# Set FACE_VERIFY_DETECTOR=retinaface or mtcnn for better detection at the
+# cost of ~2-3x slower startup on first call.
+DETECTOR_BACKEND = os.getenv("FACE_VERIFY_DETECTOR", "opencv")
+
+# Model name — Facenet512 is more accurate than Facenet (128-d).
+MODEL_NAME = os.getenv("FACE_VERIFY_MODEL", "Facenet512")
 
 # Photo storage root — relative to this file's location (apps/server/)
 PHOTOS_DIR = (
     Path(__file__).resolve().parent.parent / "receptionist" / "photos" / "employees"
 )
 
+# Captures directory — live frames are saved here for cross-verification
+CAPTURES_DIR = (
+    Path(__file__).resolve().parent.parent / "receptionist" / "photos" / "captures"
+)
+
 
 def _ensure_photos_dir() -> None:
-    """Create the photos directory if it doesn't exist yet."""
+    """Create the photos directory and captures directory if they don't exist yet."""
     PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
+    CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def get_photo_path(employee_id: int) -> Path:
     """Return the expected disk path for an employee's stored photo."""
     return PHOTOS_DIR / f"{employee_id}.jpg"
+
+
+def _save_capture(image_b64: str, employee_name: str, verified: bool, distance: float) -> Optional[Path]:
+    """
+    Save the live capture to CAPTURES_DIR for cross-verification.
+    Filename format: <timestamp>_<employee>_<result>_d<distance>.jpg
+    Returns the saved path, or None on failure.
+    """
+    try:
+        # Strip data URL prefix if present
+        raw_b64 = image_b64
+        if "," in raw_b64:
+            raw_b64 = raw_b64.split(",", 1)[1]
+
+        image_bytes = base64.b64decode(raw_b64)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_name = employee_name.replace(" ", "_")[:30]
+        result_tag = "MATCH" if verified else "MISMATCH"
+        dist_tag = f"d{distance:.3f}".replace(".", "p")
+        filename = f"{ts}_{safe_name}_{result_tag}_{dist_tag}.jpg"
+        save_path = CAPTURES_DIR / filename
+        save_path.write_bytes(image_bytes)
+        logger.info("Capture saved to: %s", save_path)
+        return save_path
+    except Exception as e:
+        logger.warning("Could not save capture for '%s': %s", employee_name, e)
+        return None
 
 
 def decode_b64_to_tempfile(image_b64: str) -> Optional[str]:
@@ -139,19 +193,49 @@ def verify_employee_face(audio_name: str, image_b64: str) -> dict:
     try:
         from deepface import DeepFace  # Lazy import — only loaded when first used
 
+        logger.info(
+            "Running DeepFace.verify | model=%s | detector=%s | stored=%s | live=%s",
+            MODEL_NAME,
+            DETECTOR_BACKEND,
+            stored_photo_path,
+            tmp_path,
+        )
+
         result = DeepFace.verify(
             img1_path=str(stored_photo_path),  # Employee's stored photo from DB
-            img2_path=tmp_path,  # Live capture from webcam
-            model_name="Facenet",  # Best accuracy/speed tradeoff on CPU
-            detector_backend="opencv",  # Fastest detector, good enough for frontal faces
-            enforce_detection=False,  # Don't crash if face isn't perfectly detected
-            distance_metric="cosine",  # Works well with Facenet
+            img2_path=tmp_path,                # Live capture from webcam
+            model_name=MODEL_NAME,             # Facenet512 — higher accuracy than Facenet128
+            detector_backend=DETECTOR_BACKEND, # Configurable via env var
+            enforce_detection=False,           # Don't crash if face isn't perfectly detected
+            distance_metric="cosine",          # Works well with Facenet family
+            align=True,                        # Face alignment greatly improves accuracy
         )
 
         verified: bool = result.get("verified", False)
         distance: float = result.get("distance", 1.0)
 
-        # Also check against our own threshold for extra control
+        # Log raw DeepFace threshold vs our custom threshold
+        deepface_threshold = result.get("threshold", FACENET_THRESHOLD)
+        logger.info(
+            "DeepFace raw result | distance=%.4f | deepface_threshold=%.4f | our_threshold=%.2f",
+            distance,
+            deepface_threshold,
+            FACENET_THRESHOLD,
+        )
+
+        # Distance > 0.9 almost certainly means face was NOT detected.
+        # Log a clear warning so the issue is easy to spot in logs.
+        if distance > 0.9:
+            logger.warning(
+                "Distance %.4f is suspiciously high (>0.9) for '%s' — "
+                "face likely NOT detected in stored photo or live frame. "
+                "Check stored photo at: %s  |  Check live capture in CAPTURES_DIR.",
+                distance,
+                audio_name,
+                stored_photo_path,
+            )
+
+        # Override with our own threshold for extra control
         if distance > FACENET_THRESHOLD:
             verified = False
 
@@ -164,7 +248,10 @@ def verify_employee_face(audio_name: str, image_b64: str) -> dict:
         )
 
         if verified:
-            message = ""  # No challenge needed — Jarvis continues normally
+            message = (
+                f"Identity verified for {audio_name}. "
+                f"You can proceed with your question or request."
+            )
         else:
             message = (
                 f"I can see someone in the camera, but it doesn't quite match "
@@ -172,16 +259,22 @@ def verify_employee_face(audio_name: str, image_b64: str) -> dict:
                 f"Could you confirm your identity?"
             )
 
+        # ── Step 5: Save the live capture for cross-verification ─────────────
+        _save_capture(image_b64, audio_name, verified, distance)
+
         return {
             "verified": verified,
             "distance": round(distance, 4),
             "message": message,
             "has_photo": True,
             "employee_id": employee.id,
+            "capture_dir": str(CAPTURES_DIR),
         }
 
     except Exception as e:
-        logger.error("DeepFace verification failed for '%s': %s", audio_name, e)
+        logger.error("DeepFace verification failed for '%s': %s", audio_name, e, exc_info=True)
+        # Save the raw capture even on error so you can inspect it
+        _save_capture(image_b64, audio_name, False, -1.0)
         # On any unexpected error, be permissive — don't block the employee
         return {
             "verified": True,

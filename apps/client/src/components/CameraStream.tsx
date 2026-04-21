@@ -21,11 +21,19 @@ interface CameraStreamProps {
   className?: string;
   onClose?: () => void;
   onStreamChange?: (stream: MediaStream | null) => void;
+  autoStartSignal?: number;
+}
+
+export interface CameraToggleButtonHandle {
+  ensureCameraReady: () => Promise<boolean>;
 }
 
 // forwardRef lets the parent hold a ref to this component and call captureFrame()
 const CameraStream = forwardRef<CameraStreamHandle, CameraStreamProps>(
-  function CameraStream({ className = '', onClose, onStreamChange }, ref) {
+  function CameraStream(
+    { className = '', onClose, onStreamChange, autoStartSignal = 0 },
+    ref
+  ) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const streamRef = useRef<MediaStream | null>(null);
@@ -115,34 +123,67 @@ const CameraStream = forwardRef<CameraStreamHandle, CameraStreamProps>(
 
     // Start camera stream
     const startStream = useCallback(async () => {
+      const baseVideoConstraints = {
+        width: { ideal: 320 },
+        height: { ideal: 240 },
+        frameRate: { ideal: 30 }
+      };
+      const selectedDeviceConstraints: MediaStreamConstraints = {
+        video: {
+          ...baseVideoConstraints,
+          deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined
+        },
+        audio: false
+      };
+      const fallbackConstraints: MediaStreamConstraints = {
+        video: baseVideoConstraints,
+        audio: false
+      };
+
       try {
         setError(null);
-
-        const constraints: MediaStreamConstraints = {
-          video: {
-            deviceId: selectedDeviceId
-              ? { exact: selectedDeviceId }
-              : undefined,
-            width: { ideal: 320 },
-            height: { ideal: 240 },
-            frameRate: { ideal: 30 }
-          },
-          audio: false
-        };
-
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const stream = await navigator.mediaDevices.getUserMedia(
+          selectedDeviceConstraints
+        );
         streamRef.current = stream;
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          videoRef.current.play();
+          await videoRef.current.play();
         }
 
         setIsStreaming(true);
-      } catch (error: unknown) {
+        return;
+      } catch (primaryError: unknown) {
+        console.warn(
+          'Primary camera start failed, retrying with default camera.',
+          primaryError
+        );
+      }
+
+      try {
+        const fallbackStream = await navigator.mediaDevices.getUserMedia(
+          fallbackConstraints
+        );
+        streamRef.current = fallbackStream;
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = fallbackStream;
+          await videoRef.current.play();
+        }
+
+        setError(
+          selectedDeviceId
+            ? 'Selected camera was unavailable. Switched to default camera.'
+            : null
+        );
+        setIsStreaming(true);
+      } catch (fallbackError: unknown) {
         const message =
-          error instanceof Error ? error.message : 'Unknown camera error';
-        console.error('Error starting camera:', error);
+          fallbackError instanceof Error
+            ? fallbackError.message
+            : 'Unknown camera error';
+        console.error('Fallback camera start failed:', fallbackError);
         setError(`Failed to start camera: ${message}`);
         setIsStreaming(false);
       }
@@ -177,6 +218,13 @@ const CameraStream = forwardRef<CameraStreamHandle, CameraStreamProps>(
         onStreamChange(isStreaming ? streamRef.current : null);
       }
     }, [isStreaming, onStreamChange]);
+
+    // Auto-start the stream whenever parent requests it.
+    useEffect(() => {
+      if (autoStartSignal > 0 && !isStreaming) {
+        void startStream();
+      }
+    }, [autoStartSignal, isStreaming, startStream]);
 
     // Mouse down handler for dragging
     const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -379,11 +427,47 @@ const CameraStream = forwardRef<CameraStreamHandle, CameraStreamProps>(
 CameraStream.displayName = 'CameraStream';
 
 // Floating Camera Toggle Button
-export const CameraToggleButton: React.FC<{
-  onStreamChange?: (stream: MediaStream | null) => void;
-  cameraRef?: React.RefObject<CameraStreamHandle | null>;
-}> = ({ onStreamChange, cameraRef }) => {
+export const CameraToggleButton = forwardRef<
+  CameraToggleButtonHandle,
+  {
+    onStreamChange?: (stream: MediaStream | null) => void;
+    cameraRef?: React.RefObject<CameraStreamHandle | null>;
+  }
+>(function CameraToggleButton({ onStreamChange, cameraRef }, ref) {
   const [showCamera, setShowCamera] = useState(false);
+  const [autoStartSignal, setAutoStartSignal] = useState(0);
+
+  const ensureCameraReady = useCallback(async () => {
+    if (!showCamera) {
+      setShowCamera(true);
+      setAutoStartSignal((value) => value + 1);
+    } else if (!cameraRef?.current?.captureFrame()) {
+      setAutoStartSignal((value) => value + 1);
+    }
+
+    // Wait briefly for mount + camera permission + first frame.
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      if (cameraRef?.current?.captureFrame()) {
+        return true;
+      }
+    }
+    return false;
+  }, [cameraRef, showCamera]);
+
+  useEffect(() => {
+    if (showCamera) {
+      setAutoStartSignal((value) => value + 1);
+    }
+  }, [showCamera]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      ensureCameraReady
+    }),
+    [ensureCameraReady]
+  );
 
   return (
     <>
@@ -402,12 +486,13 @@ export const CameraToggleButton: React.FC<{
       {showCamera && (
         <CameraStream
           ref={cameraRef}
+          autoStartSignal={autoStartSignal}
           onClose={() => setShowCamera(false)}
           onStreamChange={onStreamChange}
         />
       )}
     </>
   );
-};
+});
 
 export default CameraStream;

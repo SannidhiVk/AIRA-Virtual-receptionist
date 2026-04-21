@@ -1,17 +1,26 @@
 'use client';
 
 import { useRef } from 'react';
+import Link from 'next/link';
 import VoiceActivityDetector from '@/components/VoiceActivityDetector';
 import TalkingHead from '@/components/TalkingHead';
 import {
   CameraToggleButton,
-  CameraStreamHandle
+  CameraStreamHandle,
+  CameraToggleButtonHandle
 } from '@/components/CameraStream';
 import { useFaceVerification } from '@/hooks/useFaceVerification';
 
 export default function Home() {
   const cameraRef = useRef<CameraStreamHandle | null>(null);
-  const { result, isVerifying } = useFaceVerification(cameraRef);
+  const cameraToggleRef = useRef<CameraToggleButtonHandle | null>(null);
+  const { result, isVerifying, cameraStartupError } = useFaceVerification(
+    cameraRef,
+    {
+    ensureCameraReady: async () =>
+      (await cameraToggleRef.current?.ensureCameraReady()) ?? false
+    }
+  );
 
   return (
     <main className="relative min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
@@ -24,6 +33,14 @@ export default function Home() {
           <p className="text-lg text-gray-600">
             An AI-Based Virtual Receptionist System
           </p>
+          <div className="mt-4">
+            <Link
+              href="/admin/employees"
+              className="inline-flex rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Open Employee Photo Admin
+            </Link>
+          </div>
         </div>
 
         {/* Main Content Layout */}
@@ -43,7 +60,7 @@ export default function Home() {
       </div>
 
       {/* Floating Camera Component */}
-      <CameraToggleButton cameraRef={cameraRef} />
+      <CameraToggleButton ref={cameraToggleRef} cameraRef={cameraRef} />
 
       {/* Face verification badge */}
       {(isVerifying || result) && (
@@ -66,6 +83,12 @@ export default function Home() {
                 : 'Identity Mismatch - please confirm'}
             </div>
           )}
+        </div>
+      )}
+
+      {cameraStartupError && (
+        <div className="fixed right-6 bottom-40 z-40 max-w-sm rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 shadow-xl">
+          {cameraStartupError}
         </div>
       )}
     </main>

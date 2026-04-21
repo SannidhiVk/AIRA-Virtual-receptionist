@@ -1,7 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ChangeEvent } from 'react';
 import Image from 'next/image';
+
+const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8000'
+).replace(/\/$/, '');
 
 type Employee = {
   id: number;
@@ -17,13 +21,14 @@ export default function EmployeeAdminPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [uploadingId, setUploadingId] = useState<number | null>(null);
 
   const fetchEmployees = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch('/api/employees/');
+      const response = await fetch(`${API_BASE_URL}/api/employees/`);
       if (!response.ok) {
         throw new Error('Failed to fetch employee list');
       }
@@ -46,27 +51,38 @@ export default function EmployeeAdminPage() {
 
   const handlePhotoUpload = async (
     employeeId: number,
-    event: React.ChangeEvent<HTMLInputElement>
+    event: ChangeEvent<HTMLInputElement>
   ) => {
     const file = event.target.files?.[0];
     if (!file) {
       return;
     }
 
+    if (!file.type.startsWith('image/')) {
+      setError('Please choose a valid image file.');
+      event.target.value = '';
+      return;
+    }
+
     try {
       setUploadingId(employeeId);
       setError(null);
+      setSuccessMessage(null);
       const form = new FormData();
       form.append('file', file);
-      const response = await fetch(`/api/employees/${employeeId}/photo`, {
+      const response = await fetch(
+        `${API_BASE_URL}/api/employees/${employeeId}/photo`,
+        {
         method: 'POST',
         body: form
-      });
+        }
+      );
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         throw new Error(data.detail ?? 'Upload failed');
       }
       await fetchEmployees();
+      setSuccessMessage('Employee photo uploaded successfully.');
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : 'Photo upload failed';
@@ -87,6 +103,12 @@ export default function EmployeeAdminPage() {
       {error && (
         <div className="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
+        </div>
+      )}
+
+      {successMessage && (
+        <div className="mb-4 rounded border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+          {successMessage}
         </div>
       )}
 
@@ -121,7 +143,7 @@ export default function EmployeeAdminPage() {
                   <td className="px-4 py-3">
                     {employee.has_photo ? (
                       <Image
-                        src={`/api/employees/${employee.id}/photo`}
+                        src={`${API_BASE_URL}/api/employees/${employee.id}/photo`}
                         alt={`${employee.name} profile`}
                         className="h-14 w-14 rounded object-cover ring-1 ring-gray-200"
                         width={56}
@@ -167,6 +189,17 @@ export default function EmployeeAdminPage() {
           </table>
         </div>
       )}
+
+      <section className="mt-6 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+        <h2 className="text-base font-semibold text-gray-900">
+          When to upload photos
+        </h2>
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-600">
+          <li>Upload right after creating a new employee profile.</li>
+          <li>Re-upload when appearance changes or recognition quality drops.</li>
+          <li>Use this page only for employees, not visitor check-ins.</li>
+        </ul>
+      </section>
     </main>
   );
 }

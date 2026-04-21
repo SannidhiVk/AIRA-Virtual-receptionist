@@ -58,12 +58,53 @@ def _extract_spoken_name(text: str) -> str | None:
         r"\b(?:i am|i'm)\s+([a-zA-Z][a-zA-Z\s.'-]{1,60})",
         r"\bmy name is\s+([a-zA-Z][a-zA-Z\s.'-]{1,60})",
         r"\bthis is\s+([a-zA-Z][a-zA-Z\s.'-]{1,60})",
+        r"\b([a-zA-Z][a-zA-Z\s.'-]{1,60})\s+here\b",
     ]
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
             return match.group(1).strip(" .,!?:;")
+
+    # Fallback for short direct intros like "John" or "John Doe".
+    cleaned = re.sub(r"[^a-zA-Z\s.'-]", " ", text).strip()
+    if cleaned:
+        words = [w for w in cleaned.split() if w]
+        if 1 <= len(words) <= 2:
+            return " ".join(words)
     return None
+
+
+def _candidate_names_from_transcript(text: str) -> list[str]:
+    """
+    Build a short list of candidate names from transcript text.
+    This improves robustness when STT adds extra words around the name.
+    """
+    if not text:
+        return []
+
+    candidates: list[str] = []
+    primary = _extract_spoken_name(text)
+    if primary:
+        candidates.append(primary)
+
+    # Try common sub-parts from the first intro phrase chunk.
+    cleaned = re.sub(r"[^a-zA-Z\s.'-]", " ", text).strip()
+    words = [w for w in cleaned.split() if w]
+    if words:
+        # Full 2-word option and first-name fallback.
+        if len(words) >= 2:
+            candidates.append(f"{words[0]} {words[1]}")
+        candidates.append(words[0])
+
+    # Preserve order while removing duplicates.
+    seen = set()
+    unique: list[str] = []
+    for candidate in candidates:
+        normalized = candidate.strip().lower()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            unique.append(candidate.strip())
+    return unique
 
 
 def _resolve_employee_name(candidate_name: str) -> str | None:
@@ -94,7 +135,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     whisper_processor = WhisperProcessor.get_instance()
     tts_processor = KokoroTTSProcessor.get_instance()
     text_queue: asyncio.Queue[str] = asyncio.Queue()
-    session_state = {"mode": "PASSIVE"}
+    session_state = {"mode": "PASSIVE", "awaiting_face": False}
 
     try:
         await websocket.send_text(
@@ -168,6 +209,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         if msg.get("type") == "verify_face":
                             audio_name = msg.get("audio_name", "")
                             image_b64 = msg.get("image_b64", "")
+                            session_state["awaiting_face"] = False
                             logger.info(
                                 f"[{client_id}] Face verification requested for: '{audio_name}'"
                             )
@@ -200,16 +242,18 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                 )
                             )
 
-                            # If verification FAILED and there WAS a photo to compare against,
-                            # queue Jarvis to verbally challenge the person.
-                            if (
-                                not result["verified"]
-                                and result["has_photo"]
-                                and result["message"]
-                            ):
-                                logger.info(
-                                    f"[{client_id}] Face mismatch — queueing verbal challenge for '{audio_name}'"
-                                )
+                            # Speak verification result when a comparison was made.
+                            # - mismatch => verbal challenge
+                            # - match => verbal confirmation ("you can proceed")
+                            if result["has_photo"] and result["message"]:
+                                if result["verified"]:
+                                    logger.info(
+                                        f"[{client_id}] Face match — queueing verification confirmation for '{audio_name}'"
+                                    )
+                                else:
+                                    logger.info(
+                                        f"[{client_id}] Face mismatch — queueing verbal challenge for '{audio_name}'"
+                                    )
                                 await text_queue.put(result["message"])
 
                             continue
@@ -217,6 +261,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         # ── Stop-speaking control message ────────────────────────
                         if msg.get("action") == "stop_speaking":
                             session_state["mode"] = "PASSIVE"
+                            session_state["awaiting_face"] = False
                             await websocket.send_text(json.dumps({"state": "passive"}))
                     except Exception:
                         pass
@@ -264,6 +309,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                             f"[{client_id}] Followup timeout reached (no speech detected). Returning to PASSIVE."
                         )
                         session_state["mode"] = "PASSIVE"
+                        session_state["awaiting_face"] = False
                         await websocket.send_text(json.dumps({"state": "passive"}))
                         continue
 
@@ -314,26 +360,39 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                 if text and text not in ("NOISE_DETECTED", "NO_SPEECH"):
                                     # If we can confidently resolve an employee name from
                                     # what was spoken, notify frontend to trigger face check.
-                                    candidate = _extract_spoken_name(text)
-                                    if candidate:
-                                        loop = asyncio.get_event_loop()
+                                    candidates = _candidate_names_from_transcript(text)
+                                    loop = asyncio.get_event_loop()
+                                    employee_name = None
+                                    for candidate in candidates:
                                         employee_name = await loop.run_in_executor(
                                             _face_executor,
                                             _resolve_employee_name,
                                             candidate,
                                         )
                                         if employee_name:
-                                            await websocket.send_text(
-                                                json.dumps(
-                                                    {
-                                                        "type": "employee_identified",
-                                                        "name": employee_name,
-                                                    }
-                                                )
+                                            logger.info(
+                                                f"[{client_id}] Employee identified from candidate '{candidate}' as '{employee_name}'"
                                             )
-                                    await text_queue.put(text)
+                                            break
+
+                                    if employee_name:
+                                        logger.info(
+                                            f"[{client_id}] employee_identified emitted: '{employee_name}'"
+                                        )
+                                        session_state["awaiting_face"] = True
+                                        await websocket.send_text(
+                                            json.dumps(
+                                                {
+                                                    "type": "employee_identified",
+                                                    "name": employee_name,
+                                                }
+                                            )
+                                        )
+                                    else:
+                                        await text_queue.put(text)
                                 else:
                                     session_state["mode"] = "PASSIVE"
+                                    session_state["awaiting_face"] = False
                                     await websocket.send_text(
                                         json.dumps({"state": "passive"})
                                     )

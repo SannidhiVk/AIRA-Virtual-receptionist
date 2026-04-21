@@ -15,12 +15,21 @@ export interface FaceVerificationResult {
   hasPhoto: boolean;
 }
 
+interface FaceVerificationOptions {
+  ensureCameraReady?: () => Promise<boolean>;
+}
+
 export function useFaceVerification(
-  cameraRef: React.RefObject<CameraStreamHandle | null>
+  cameraRef: React.RefObject<CameraStreamHandle | null>,
+  options?: FaceVerificationOptions
 ) {
   const [isVerifying, setIsVerifying] = useState(false);
   const [result, setResult] = useState<FaceVerificationResult | null>(null);
+  const [cameraStartupError, setCameraStartupError] = useState<string | null>(
+    null
+  );
   const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearCameraErrorRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const {
     onVerificationResult,
     sendFaceVerificationRequest,
@@ -51,6 +60,9 @@ export function useFaceVerification(
     return () => {
       if (clearTimerRef.current) {
         clearTimeout(clearTimerRef.current);
+      }
+      if (clearCameraErrorRef.current) {
+        clearTimeout(clearCameraErrorRef.current);
       }
     };
   }, [onVerificationResult]);
@@ -92,9 +104,32 @@ export function useFaceVerification(
       return;
     }
     onEmployeeIdentified((employeeName) => {
-      verifyFace(employeeName);
+      void (async () => {
+        if (options?.ensureCameraReady) {
+          const isReady = await options.ensureCameraReady();
+          if (!isReady) {
+            const message =
+              'Could not start camera automatically. Please allow camera access and try again.';
+            setCameraStartupError(message);
+            console.warn(
+              'Face verification skipped: camera could not be started automatically.',
+              { employeeName }
+            );
+            if (clearCameraErrorRef.current) {
+              clearTimeout(clearCameraErrorRef.current);
+            }
+            clearCameraErrorRef.current = setTimeout(
+              () => setCameraStartupError(null),
+              6000
+            );
+            return;
+          }
+        }
+        setCameraStartupError(null);
+        verifyFace(employeeName);
+      })();
     });
-  }, [onEmployeeIdentified, verifyFace]);
+  }, [onEmployeeIdentified, options, verifyFace]);
 
-  return { verifyFace, isVerifying, result };
+  return { verifyFace, isVerifying, result, cameraStartupError };
 }
