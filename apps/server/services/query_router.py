@@ -14,8 +14,17 @@ AI_NAME = "Jarvis"
 COMPANY_NAME = "Sharp Software Development India Pvt. Ltd."
 
 PRONOUNS = {
-    "him", "her", "them", "he", "she", "they", "it",
-    "that person", "someone", "this guy", "this person",
+    "him",
+    "her",
+    "them",
+    "he",
+    "she",
+    "they",
+    "it",
+    "that person",
+    "someone",
+    "this guy",
+    "this person",
 }
 
 
@@ -40,35 +49,44 @@ def clear_session_state(client_id: str, retain_name=False) -> None:
     # 1. DELETE the key entirely to ensure NO data persists
     if client_id in _client_sessions:
         del _client_sessions[client_id]
-    
+
     # 2. Re-initialize a truly empty state
     _client_sessions[client_id] = _fresh_state()
-    
+
     try:
         # 3. Wipe Groq History
         GroqProcessor.get_instance().reset_history(client_id)
         # 4. Wipe external pronoun context
         from client_context import clear_context
+
         clear_context(client_id)
-        logger.info(f"HARD RESET: All data for {client_id} has been physically deleted.")
+        logger.info(
+            f"HARD RESET: All data for {client_id} has been physically deleted."
+        )
     except Exception as e:
         logger.error(f"Reset failed: {e}")
 
+
 def _is_jarvis(name: str) -> bool:
     """Detects if a name is actually the AI's own name (Jarvis, Davis, Darwis, etc.)"""
-    if not name: return False
+    if not name:
+        return False
     # Common mishearings from Whisper
     blacklist = {"jarvis", "davis", "darwis", "darvis", "jarves", "dervis", "jarvis"}
     return name.lower().strip().replace(".", "") in blacklist
 
+
 def _is_self_reference(name: str) -> bool:
     """Returns True if the name sounds like the AI's own name."""
-    if not name: return False
+    if not name:
+        return False
     self_names = {AI_NAME.lower(), "jarvis", "darwis", "darvis", "jarvis", "jarves"}
     return name.lower() in self_names
 
 
 import uuid
+
+
 def _fresh_state() -> Dict[str, Any]:
     return {
         "session_id": str(uuid.uuid4()),
@@ -192,7 +210,7 @@ def _lookup_employee(search_term: str) -> Optional[Any]:
         db.close()
 
 
-def _commit_checkin(state: Dict[str, Any],client_id: str) -> bool:
+def _commit_checkin(state: Dict[str, Any], client_id: str) -> bool:
     db = SessionLocal()
     try:
         # 1. Resolve Visitor (Handle cases where name might be missing for quick deliveries)
@@ -333,10 +351,19 @@ DELIVERY_SERVICES = {
 }
 
 
-def _merge_checkin_entities(state: Dict[str, Any], entities: Dict[str, Any], client_id: str, user_query: str) -> None:
+def _merge_checkin_entities(
+    state: Dict[str, Any], entities: Dict[str, Any], client_id: str, user_query: str
+) -> None:
     # 1. Detect if the speaker is an employee
     query_low = user_query.lower()
-    employee_keywords = {"manager", "director", "employee", "staff", "intern", "i work here"}
+    employee_keywords = {
+        "manager",
+        "director",
+        "employee",
+        "staff",
+        "intern",
+        "i work here",
+    }
     if any(k in query_low for k in employee_keywords) and "i am" in query_low:
         state["is_employee"] = True
         state["visitor_type"] = "Internal Staff"
@@ -347,7 +374,9 @@ def _merge_checkin_entities(state: Dict[str, Any], entities: Dict[str, Any], cli
         state["visitor_name"] = v_name.capitalize()
 
     # 3. Update Host (Filter out 'Travis/Davis')
-    target = _clean_entity(entities.get("employee_name")) or _clean_entity(entities.get("role"))
+    target = _clean_entity(entities.get("employee_name")) or _clean_entity(
+        entities.get("role")
+    )
     if target and not _is_jarvis(target) and target.lower() not in PRONOUNS:
         state["meeting_with_raw"] = target
         state["meeting_with_resolved"] = None
@@ -355,8 +384,12 @@ def _merge_checkin_entities(state: Dict[str, Any], entities: Dict[str, Any], cli
     # 4. Delivery/Visitor Reset
     raw_p = _clean_entity(entities.get("purpose"))
     if not state.get("is_employee"):
-        state["visitor_type"] = _determine_visitor_type(user_query, str(raw_p or ""), state["visitor_type"])
-        state["is_delivery"] = True if state["visitor_type"] in ["Delivery", "Food Delivery"] else False
+        state["visitor_type"] = _determine_visitor_type(
+            user_query, str(raw_p or ""), state["visitor_type"]
+        )
+        state["is_delivery"] = (
+            True if state["visitor_type"] in ["Delivery", "Food Delivery"] else False
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -364,13 +397,13 @@ def _merge_checkin_entities(state: Dict[str, Any], entities: Dict[str, Any], cli
 # Now passes everything Jarvis already knows so it never asks twice.
 # ─────────────────────────────────────────────────────────────────────────────
 async def _llm_reply(
-    situation: str, 
+    situation: str,
     state: dict[str, Any],
-    context: dict, 
-    user_query: str = None, 
-    client_id: str = None
+    context: dict,
+    user_query: str = None,
+    client_id: str = None,
 ) -> str:
-    
+
     llm = GroqProcessor.get_instance()
 
     is_emp = "EMPLOYEE" if state.get("is_employee") else "VISITOR"
@@ -380,13 +413,17 @@ async def _llm_reply(
     visitor_name = context.get("visitor_name")
     host_name = context.get("employee_name")
     purpose = context.get("purpose")
-    
+
     known_info = []
-    if visitor_name: known_info.append(f"- Visitor Name: {visitor_name}")
-    if host_name: known_info.append(f"- Meeting With: {host_name}")
-    if purpose: known_info.append(f"- Purpose: {purpose}")
-    if state.get("is_employee"): known_info.append("- User Type: Employee/Staff")
-    
+    if visitor_name:
+        known_info.append(f"- Visitor Name: {visitor_name}")
+    if host_name:
+        known_info.append(f"- Meeting With: {host_name}")
+    if purpose:
+        known_info.append(f"- Purpose: {purpose}")
+    if state.get("is_employee"):
+        known_info.append("- User Type: Employee/Staff")
+
     info_block = "\n".join(known_info) if known_info else "- No info yet."
 
     prompt = f"""
@@ -415,11 +452,14 @@ async def _llm_reply(
 
     try:
         response = await llm.get_raw_response(prompt, client_id=client_id)
-        return response.strip().replace('"', '')
-    
+        return response.strip().replace('"', "")
+
     except Exception as e:
         logger.error(f"Error generating LLM reply: {e}")
-        return "I'm sorry, I'm having a bit of trouble. Could you please say that again?"
+        return (
+            "I'm sorry, I'm having a bit of trouble. Could you please say that again?"
+        )
+
 
 async def _handle_scheduling(
     client_id: str,
@@ -429,27 +469,43 @@ async def _handle_scheduling(
     intent: str,
 ) -> str:
     # ... (Keep existing entity capture logic at the top of this function) ...
-    target = _clean_entity(entities.get("employee_name")) or _clean_entity(entities.get("role"))
-    if target and not state["sched_employee_raw"]: state["sched_employee_raw"] = target
-    if entities.get("date") and not state["sched_date"]: state["sched_date"] = _normalize_date(str(entities["date"]))
-    if entities.get("time") and not state["sched_time"]: state["sched_time"] = _normalize_time(str(entities["time"]))
-    if _clean_entity(entities.get("purpose")) and not state["sched_purpose"]: state["sched_purpose"] = _clean_entity(entities["purpose"])
+    target = _clean_entity(entities.get("employee_name")) or _clean_entity(
+        entities.get("role")
+    )
+    if target and not state["sched_employee_raw"]:
+        state["sched_employee_raw"] = target
+    if entities.get("date") and not state["sched_date"]:
+        state["sched_date"] = _normalize_date(str(entities["date"]))
+    if entities.get("time") and not state["sched_time"]:
+        state["sched_time"] = _normalize_time(str(entities["time"]))
+    if _clean_entity(entities.get("purpose")) and not state["sched_purpose"]:
+        state["sched_purpose"] = _clean_entity(entities["purpose"])
 
     # ... (Keep existing missing info checks for name, host, date, time, purpose) ...
-    if not state.get("visitor_name"): return await _llm_reply("Ask for their name.", state, user_query, client_id)
-    if not state["sched_employee_raw"]: return await _llm_reply("Ask who they want to meet.", state, user_query, client_id)
-    
+    if not state.get("visitor_name"):
+        return await _llm_reply("Ask for their name.", state, user_query, client_id)
+    if not state["sched_employee_raw"]:
+        return await _llm_reply(
+            "Ask who they want to meet.", state, user_query, client_id
+        )
+
     if not state["sched_employee_name"]:
         emp = _lookup_employee(state["sched_employee_raw"])
         if not emp:
             state["sched_employee_raw"] = None
-            return await _llm_reply("Tell them host not found.", state, user_query, client_id)
-        state["sched_employee_name"], state["sched_employee_email"] = emp.name, getattr(emp, "email", None)
+            return await _llm_reply(
+                "Tell them host not found.", state, user_query, client_id
+            )
+        state["sched_employee_name"], state["sched_employee_email"] = emp.name, getattr(
+            emp, "email", None
+        )
 
-    if not state["sched_date"]: return await _llm_reply("Ask for date.", state, user_query, client_id)
-    if not state["sched_time"]: return await _llm_reply("Ask for time.", state, user_query, client_id)
-    if not state["sched_purpose"]: return await _llm_reply("Ask for purpose.", state, user_query, client_id)
-
+    if not state["sched_date"]:
+        return await _llm_reply("Ask for date.", state, user_query, client_id)
+    if not state["sched_time"]:
+        return await _llm_reply("Ask for time.", state, user_query, client_id)
+    if not state["sched_purpose"]:
+        return await _llm_reply("Ask for purpose.", state, user_query, client_id)
 
     # --- UPDATED CONFIRMATION LOGIC ---
     is_yes = intent == "confirm" or any(
@@ -539,25 +595,35 @@ async def route_query(client_id: str, user_query: str) -> str:
     query_clean = user_query.lower().strip()
 
     # 1. WAKE WORD RESET (Travis/Davis/Darwis)
-    if (user_query == "WAKE_WORD_TRIGGERED") or \
-       re.match(r"^(hey jarvis|hi jarvis|jarvis|hey travis|hey davis)\b", query_clean):
+    if (user_query == "WAKE_WORD_TRIGGERED") or re.match(
+        r"^(hey jarvis|hi jarvis|jarvis|hey travis|hey davis)\b", query_clean
+    ):
         clear_session_state(client_id)
         state = get_session_state(client_id)
         return f"Welcome to {COMPANY_NAME}. I am {AI_NAME}, how can I assist you today?"
 
     # 2. INTENT EXTRACTION
     extracted = await llm.extract_intent_and_entities(user_query)
-    entities, intent = extracted.get("entities", {}), extracted.get("intent", "general_conversation")
+    entities, intent = extracted.get("entities", {}), extracted.get(
+        "intent", "general_conversation"
+    )
     _merge_checkin_entities(state, entities, client_id, user_query)
 
     # 3. EMPLOYEE FLOW (Priya doesn't need to 'check in')
     if state.get("is_employee"):
         if intent == "schedule_meeting" or state.get("scheduling_active"):
             state["scheduling_active"] = True
-            return await _handle_scheduling(client_id, user_query, state, entities, intent)
+            return await _handle_scheduling(
+                client_id, user_query, state, entities, intent
+            )
         # If an employee asks for deliveries
         if "delivery" in query_clean or "parcel" in query_clean:
-            return await _llm_reply("Tell them you are checking the delivery log for their name.", state, user_query, client_id)
+            return await _llm_reply(
+                "Tell them you are checking the delivery log for their name.",
+                state,
+                user_query,
+                client_id,
+            )
 
     # 4. ABUSE FILTER (Stay professional, then stop)
     curse_words = {"bitch", "dumbass", "gay", "stupid", "shut up"}
@@ -569,10 +635,14 @@ async def route_query(client_id: str, user_query: str) -> str:
         return await _advance_checkin(state, user_query, client_id)
 
     # 6. DEFAULT
-    return await llm.get_response(client_id, user_query, company_info=_get_full_company_info(state))
+    return await llm.get_response(
+        client_id, user_query, company_info=_get_full_company_info(state)
+    )
 
 
-async def _advance_checkin(state: Dict[str, Any], user_query: str, client_id: str) -> str:
+async def _advance_checkin(
+    state: Dict[str, Any], user_query: str, client_id: str
+) -> str:
     if state["meeting_with_raw"] and _is_jarvis(state["meeting_with_raw"]):
         state["meeting_with_raw"] = None
     # Resolve host if we have a name
@@ -584,22 +654,31 @@ async def _advance_checkin(state: Dict[str, Any], user_query: str, client_id: st
     # 1. Delivery Flow
     if state.get("is_delivery"):
         if not state.get("meeting_with_raw"):
-            return await _llm_reply("Ask who the delivery is for. Do not guess a name.", state, user_query, client_id)
+            return await _llm_reply(
+                "Ask who the delivery is for. Do not guess a name.",
+                state,
+                user_query,
+                client_id,
+            )
         return await _complete_checkin(state, user_query, client_id)
 
     # 2. Standard Visitor Flow
     if not state.get("visitor_name"):
-        return await _llm_reply("Ask for the visitor's name.", state, user_query, client_id)
+        return await _llm_reply(
+            "Ask for the visitor's name.", state, user_query, client_id
+        )
 
     if not state.get("meeting_with_raw"):
-        return await _llm_reply("Ask who they are here to see.", state, user_query, client_id)
+        return await _llm_reply(
+            "Ask who they are here to see.", state, user_query, client_id
+        )
 
     return await _complete_checkin(state, user_query, client_id)
 
 
-
-
-async def _complete_checkin(state: Dict[str, Any], user_query: str, client_id: str) -> str:
+async def _complete_checkin(
+    state: Dict[str, Any], user_query: str, client_id: str
+) -> str:
     # Fire the database log
     _commit_checkin(state, client_id)
     state["conv_state"] = State.COMPLETED
@@ -607,8 +686,16 @@ async def _complete_checkin(state: Dict[str, Any], user_query: str, client_id: s
     host = state.get("meeting_with_resolved") or state.get("meeting_with_raw")
 
     if state.get("is_delivery"):
-        return await _llm_reply(f"Tell them to leave the package. You will ping {host}.", state, user_query, client_id)
+        return await _llm_reply(
+            f"Tell them to leave the package. You will ping {host}.",
+            state,
+            user_query,
+            client_id,
+        )
 
-    return await _llm_reply(f"Confirm check-in. Notify {host}. Direct them to the correct floor.", state, user_query, client_id)
-
-
+    return await _llm_reply(
+        f"Confirm check-in. Notify {host}. Direct them to the correct floor.",
+        state,
+        user_query,
+        client_id,
+    )
