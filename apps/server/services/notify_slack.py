@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 logger = logging.getLogger(__name__)
 
 import os
+
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
 
 # ✅ Fix 1: Use a bounded thread pool instead of unbounded thread spawning
@@ -42,21 +43,29 @@ def _send_slack_notification_thread(
 
 
 def send_slack_arrival(
-    employee_name: str, visitor_name: str, visitor_type: str, purpose: str,
-    session_id: str  # ✅ Fix 2: tie each notification to a visitor session
+    employee_name: str,
+    visitor_name: str,
+    visitor_type: str,
+    purpose: str,
+    session_id: str,  # ✅ Fix 2: tie each notification to a visitor session
 ):
     """Submit notification to the thread pool; deduplicate per session."""
     with _notify_lock:
         # ✅ Fix 2: Only send once per unique visitor session
         if _last_notified.get(session_id) == visitor_name:
-            logger.warning(f"Duplicate Slack notification blocked for session {session_id}")
+            logger.warning(
+                f"Duplicate Slack notification blocked for session {session_id}"
+            )
             return
         _last_notified[session_id] = visitor_name
 
     # ✅ Fix 1: submit() to bounded pool — no runaway thread creation
     _executor.submit(
         _send_slack_notification_thread,
-        employee_name, visitor_name, visitor_type, purpose
+        employee_name,
+        visitor_name,
+        visitor_type,
+        purpose,
     )
 
 

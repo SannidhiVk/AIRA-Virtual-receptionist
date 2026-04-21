@@ -82,7 +82,10 @@ def clear_session_state(client_id: str, retain_name=False) -> None:
         except Exception as e:
             logger.error(f"Error during hard reset: {e}")
 
+
 import uuid
+
+
 def _fresh_state() -> Dict[str, Any]:
     return {
         "session_id": str(uuid.uuid4()),
@@ -206,7 +209,7 @@ def _lookup_employee(search_term: str) -> Optional[Any]:
         db.close()
 
 
-def _commit_checkin(state: Dict[str, Any],client_id: str) -> bool:
+def _commit_checkin(state: Dict[str, Any], client_id: str) -> bool:
     db = SessionLocal()
     try:
         # 1. Resolve Visitor (Handle cases where name might be missing for quick deliveries)
