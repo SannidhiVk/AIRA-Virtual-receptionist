@@ -38,25 +38,26 @@ SMART DIRECTORY SEARCH:
 - If no record is found, say: "I couldn't find a specific person for that, but I can notify our administration team to help you."
 """
 
-EXTRACT_SYSTEM = """You are an NLU engine. Extract data and return ONLY JSON.
-Output format:
-{
-  "intent": "check_in" | "schedule_meeting" | "employee_lookup" | "general",
-  "entities": {
-    "visitor_name": string, "employee_name": string, "purpose": string, "visitor_type": string
-  }
-}
+EXTRACT_SYSTEM = """You are an NLU engine. Extract JSON.
+- intent: "check_in", "schedule_meeting", "confirm", "general"
+- visitor_type: "employee", "delivery", "guest"
 
-VISITOR_TYPE MUST BE: "food_delivery", "delivery", "interviewee", "client", or "contractor".
-- Swiggy/Zomato/Food = "food_delivery"
-- Amazon/Courier = "delivery"
-- Electrician/Plumber = "contractor"
+EXAMPLES:
+"I am Alex and I'm the new intern" -> { "visitor_name": "Alex", "visitor_type": "employee", "purpose": "new intern joining" }
+"I am from Flipkart" -> { "visitor_name": "Flipkart", "visitor_type": "delivery" }
+
+VISITOR_TYPE MUST BE: "employee", "food_delivery", "delivery", "interviewee", "client", or "contractor".
+- Staff / I work here / Manager = "employee"
+- Swiggy / Zomato / Food = "food_delivery"
+- Amazon / Courier / Package = "delivery"
+- Electrician / Plumber / Maintenance = "contractor"
+- Job Interview / Candidate = "interviewee"
 """
 
-# ─────────────────────────────────────────────────────────────────────────────
-# EXTRACTION PROMPT (PURE NLU ENGINE)
-# ─────────────────────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────────────────
+# EXTRACTION PROMPT (NLU ENGINE)
+# ─────────────────────────────────────────────────────────────────────────────
 
 EXTRACT_SYSTEM = """You are an information extraction engine for a corporate receptionist system.
 Given a visitor's spoken input, extract structured data and return ONLY a valid JSON object.
@@ -72,37 +73,38 @@ Output format:
     "date": <string|null>,
     "time": <string|null>,
     "purpose": <string|null>,
-    "visitor_type": <string|null>
+    "visitor_type": <string|null>,
     "email": <string|null>
   }
 }
 
 INTENT CLASSIFICATION RULES:
-- "check_in" : Arriving at the office NOW to see someone, attend an interview, or drop off a package.
-- "employee_arrival" : An employee who works here arriving for the day.
-- "schedule_meeting" : Wants to BOOK, SCHEDULE, or SET UP a FUTURE appointment.
-- "employee_lookup" : Asking where a person or department is.
-- "facility_request" : Complaining or asking about the environment (AC, lights, cleaning).
-- "general_conversation" : Greetings, small talk.
-- "confirm" : Saying yes, go ahead.
-- "cancel" : Saying no, cancel.
+- "check_in" : Arriving at the office NOW to start work, see someone, or drop off a package.
+- "schedule_meeting" : Wants to BOOK or SET UP a FUTURE appointment.
+- "employee_lookup" : Asking for availability or location of a colleague/department.
+- "confirm" : Saying yes, correct, or "schedule it".
+- "general_conversation" : Greetings or small talk.
 
-VISITOR TYPE CATEGORIES (MUST BE ONE OF THESE IF APPLICABLE):
-- "Contractor/Vendor" : Maintenance, electrician, plumber, service staff.
-- "Interviewee" : Job candidates, HR interviews.
-- "Client" : Clients, demos, customer meetings.
-- "Delivery" : Amazon, Flipkart, packages, couriers.
-- "Food Delivery" : Swiggy, Zomato.
-- "Visitor/Guest" : General personal/business meetings.
+VISITOR TYPE CATEGORIES (MUST BE ONE OF THESE):
+- "Employee" : Staff members, managers, or anyone who says "I work here".
+- "Delivery" : Amazon, Flipkart, DHL, or general package couriers.
+- "Food Delivery" : Swiggy, Zomato, or food orders.
+- "Interviewee" : Job candidates or HR interviews.
+- "Contractor/Vendor" : Maintenance, electrician, plumber, or service staff.
+- "Client" : External business customers or demos.
+- "Visitor/Guest" : General personal or business meetings.
 
 FEW-SHOT EXAMPLES:
-Input: "I am here for an HR interview."
-Output: {"intent": "check_in", "entities": {"visitor_name": null, "employee_name": null, "role": null, "date": null, "time": null, "purpose": "HR interview", "visitor_type": "Interviewee"}}
 
-Input: "I have a package from Amazon for Sanjay."
-Output: {"intent": "check_in", "entities": {"visitor_name": "Amazon", "employee_name": "Sanjay", "role": null, "date": null, "time": null, "purpose": "delivery", "visitor_type": "Delivery"}}
+Input: "I am Priya and I am an employee here."
+Output: {"intent": "check_in", "entities": {"visitor_name": "Priya", "employee_name": null, "role": "Employee", "date": null, "time": null, "purpose": "reporting for work", "visitor_type": "Employee"}}
+
+Input: "I'm from Amazon to drop off a parcel for Virat."
+Output: {"intent": "check_in", "entities": {"visitor_name": "Amazon", "employee_name": "Virat", "role": null, "date": null, "time": null, "purpose": "parcel delivery", "visitor_type": "Delivery"}}
+
+Input: "Yes, please schedule that for 5 p.m. today."
+Output: {"intent": "confirm", "entities": {"visitor_name": null, "employee_name": null, "role": null, "date": "today", "time": "5:00 PM", "purpose": null, "visitor_type": null}}
 """
-
 # ─────────────────────────────────────────────────────────────────────────────
 # ENV / API KEY
 # ─────────────────────────────────────────────────────────────────────────────

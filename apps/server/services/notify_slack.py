@@ -96,3 +96,4 @@ def clear_session(session_id: str):
     """Clean up the notification history for a session."""
     with _notify_lock:
         _last_notified.pop(session_id, None)
+        logger.info(f"Cleared Slack notification cache for session {session_id}")
