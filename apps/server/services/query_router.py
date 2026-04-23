@@ -117,6 +117,10 @@ def clear_session_state(client_id: str) -> None:
     except Exception as e:
         logger.error(f"Hardware reset failed for {client_id}: {e}")
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 066b8c9ad4bcccb408fadc24c8fa159f8e01e817
 
 def _fresh_state() -> Dict[str, Any]:
     return {
