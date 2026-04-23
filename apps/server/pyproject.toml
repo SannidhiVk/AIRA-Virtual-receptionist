@@ -32,6 +32,13 @@ dependencies = [
     "silero-vad",
     "deepface>=0.0.93",
     "tf-keras",
+    "deepface>=0.0.93",
+    "tf-keras",                   # Required for newer DeepFace/TF compatibility
+    "python-dotenv",              # <--- ADDED: For load_dotenv()
+    "mtcnn",                      # <--- ADDED: Required for FACE_VERIFY_DETECTOR=mtcnn
+    "tensorflow-cpu",             # <--- ADDED: Forces CPU-only to avoid GPU/CUDA headaches
+    "opencv-python-headless",     # <--- ADDED: Safer for server environments (avoids libGL errors)
+
 ]
 
 [project.optional-dependencies]

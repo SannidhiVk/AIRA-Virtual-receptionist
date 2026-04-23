@@ -38,22 +38,22 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+# --- ADD THESE TWO LINES ---
+from dotenv import load_dotenv
+
+load_dotenv()
+# ---------------------------
+
 logger = logging.getLogger(__name__)
 
 # ── Threshold tuning ──────────────────────────────────────────────────────────
-# Facenet512 cosine distance: lower = more similar.
-# Default DeepFace threshold for Facenet512 cosine is ~0.30.
-# We use 0.40 to be tolerant of glasses / different lighting.
-# Raise to 0.50 if you still get false mismatches in your environment.
-FACENET_THRESHOLD = float(os.getenv("FACE_VERIFY_THRESHOLD", "0.40"))
+VERIFY_THRESHOLD = float(os.getenv("FACE_VERIFY_THRESHOLD", "0.68"))
 
-# Detector backend — opencv is fast but sometimes misses faces.
-# Set FACE_VERIFY_DETECTOR=retinaface or mtcnn for better detection at the
-# cost of ~2-3x slower startup on first call.
-DETECTOR_BACKEND = os.getenv("FACE_VERIFY_DETECTOR", "opencv")
+# Change the default fallback from "yolov8" to "mtcnn" or "opencv"
+DETECTOR_BACKEND = os.getenv("FACE_VERIFY_DETECTOR", "mtcnn")
 
-# Model name — Facenet512 is more accurate than Facenet (128-d).
-MODEL_NAME = os.getenv("FACE_VERIFY_MODEL", "Facenet512")
+# Model name
+MODEL_NAME = os.getenv("FACE_VERIFY_MODEL", "ArcFace")
 
 # Photo storage root — relative to this file's location (apps/server/)
 PHOTOS_DIR = (
@@ -208,7 +208,7 @@ def verify_employee_face(audio_name: str, image_b64: str) -> dict:
             img2_path=tmp_path,  # Live capture from webcam
             model_name=MODEL_NAME,  # Facenet512 — higher accuracy than Facenet128
             detector_backend=DETECTOR_BACKEND,  # Configurable via env var
-            enforce_detection=False,  # Don't crash if face isn't perfectly detected
+            enforce_detection=True,  # Don't crash if face isn't perfectly detected
             distance_metric="cosine",  # Works well with Facenet family
             align=True,  # Face alignment greatly improves accuracy
         )
@@ -217,16 +217,16 @@ def verify_employee_face(audio_name: str, image_b64: str) -> dict:
         distance: float = result.get("distance", 1.0)
 
         # Log raw DeepFace threshold vs our custom threshold
-        deepface_threshold = result.get("threshold", FACENET_THRESHOLD)
+        # Log raw DeepFace threshold vs our custom threshold
+        deepface_threshold = result.get("threshold", VERIFY_THRESHOLD)
         logger.info(
             "DeepFace raw result | distance=%.4f | deepface_threshold=%.4f | our_threshold=%.2f",
             distance,
             deepface_threshold,
-            FACENET_THRESHOLD,
+            VERIFY_THRESHOLD,
         )
 
         # Distance > 0.9 almost certainly means face was NOT detected.
-        # Log a clear warning so the issue is easy to spot in logs.
         if distance > 0.9:
             logger.warning(
                 "Distance %.4f is suspiciously high (>0.9) for '%s' — "
@@ -238,7 +238,7 @@ def verify_employee_face(audio_name: str, image_b64: str) -> dict:
             )
 
         # Override with our own threshold for extra control
-        if distance > FACENET_THRESHOLD:
+        if distance > VERIFY_THRESHOLD:
             verified = False
 
         logger.info(
@@ -246,7 +246,7 @@ def verify_employee_face(audio_name: str, image_b64: str) -> dict:
             audio_name,
             verified,
             distance,
-            FACENET_THRESHOLD,
+            VERIFY_THRESHOLD,
         )
 
         if verified:
@@ -279,11 +279,13 @@ def verify_employee_face(audio_name: str, image_b64: str) -> dict:
         )
         # Save the raw capture even on error so you can inspect it
         _save_capture(image_b64, audio_name, False, -1.0)
-        # On any unexpected error, be permissive — don't block the employee
+
+        # --- UPDATE THIS RETURN BLOCK ---
+        # Do NOT return verified: True on a crash. Return False and a message.
         return {
-            "verified": True,
+            "verified": False,
             "distance": -1.0,
-            "message": "",
+            "message": "I'm sorry, I encountered an error while trying to verify your face. Please try again.",
             "has_photo": True,
             "employee_id": employee.id,
         }

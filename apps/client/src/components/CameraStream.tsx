@@ -149,7 +149,15 @@ const CameraStream = forwardRef<CameraStreamHandle, CameraStreamProps>(
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          await videoRef.current.play();
+          const playPromise = videoRef.current.play();
+          if (playPromise !== undefined) {
+            playPromise.catch((error) =>
+              console.warn(
+                'Video play interrupted by re-render, ignoring:',
+                error
+              )
+            );
+          }
         }
 
         setIsStreaming(true);
@@ -168,7 +176,15 @@ const CameraStream = forwardRef<CameraStreamHandle, CameraStreamProps>(
 
         if (videoRef.current) {
           videoRef.current.srcObject = fallbackStream;
-          await videoRef.current.play();
+          const playPromise = videoRef.current.play();
+          if (playPromise !== undefined) {
+            playPromise.catch((error) =>
+              console.warn(
+                'Video play interrupted by re-render, ignoring:',
+                error
+              )
+            );
+          }
         }
 
         setError(
@@ -366,7 +382,6 @@ const CameraStream = forwardRef<CameraStreamHandle, CameraStreamProps>(
             className="h-full w-full object-cover"
             playsInline
             muted
-            autoPlay
           />
 
           {/* Overlay when not streaming */}
