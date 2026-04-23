@@ -95,5 +95,8 @@ def send_slack_arrival(
 def clear_session(session_id: str):
     """Clean up the notification history for a session."""
     with _notify_lock:
-        _last_notified.pop(session_id, None)
+        # We find and remove any keys associated with this session_id
+        keys_to_remove = [k for k in _last_notified.keys() if k == session_id]
+        for k in keys_to_remove:
+            _last_notified.pop(k, None)
         logger.info(f"Cleared Slack notification cache for session {session_id}")
