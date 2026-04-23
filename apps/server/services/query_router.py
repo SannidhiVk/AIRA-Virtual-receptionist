@@ -118,6 +118,7 @@ def clear_session_state(client_id: str) -> None:
         logger.error(f"Hardware reset failed for {client_id}: {e}")
 
 
+
 def _fresh_state() -> Dict[str, Any]:
     return {
         "session_id": str(uuid.uuid4()),
