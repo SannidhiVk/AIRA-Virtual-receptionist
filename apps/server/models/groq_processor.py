@@ -10,7 +10,7 @@ from groq import AsyncGroq
 
 logger = logging.getLogger(__name__)
 
-MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 AI_NAME = "Jarvis"
 COMPANY_NAME = "Sharp Software Development India Private Limited."
 
