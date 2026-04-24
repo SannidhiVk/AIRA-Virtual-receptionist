@@ -7,20 +7,18 @@ WAKE_WORD_GREETING = (
 )
 
 
+from services.query_router import route_query, clear_session_state
+
+
 async def process_text_for_client(client_id: str, text: str) -> str:
-    """
-    Process a user utterance and return the assistant response text.
-    """
-    if not text or not text.strip():
+    if not text:
         return ""
 
-    if text == WAKE_WORD_TRIGGER_TEXT:
-        return WAKE_WORD_GREETING
+    if text == "WAKE_WORD_TRIGGERED":
+        clear_session_state(client_id)
+        return "Good Afternoon! Welcome to Sharp Software Development India Private Limited. I am Jarvis, how can I assist you today?"
 
     try:
-        from services.query_router import route_query
-
         return await route_query(client_id, text)
-    except Exception as exc:
-        logger.error("route_query failed: %s", exc, exc_info=True)
-        return "I'm sorry, I'm having trouble connecting to my systems."
+    except Exception as e:
+        return "I am having trouble processing that. Could you repeat?"
