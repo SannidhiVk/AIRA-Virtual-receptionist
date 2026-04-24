@@ -297,9 +297,8 @@ def _merge_checkin_entities(
 
 
 # 3. IMPROVED DATABASE LOGGING (Detailed Notes)
-def _commit_checkin(state: Dict[str, Any], user_query: str, client_id: str) -> bool:
+def _commit_checkin(state: Dict[str, Any], client_id: str, user_query: str) -> bool:
     db = SessionLocal()
-    query_low = user_query.lower()
     try:
         v_name = state.get("visitor_name") or "Guest"
         visitor = db.query(Visitor).filter(Visitor.name.ilike(v_name)).first()
@@ -308,36 +307,33 @@ def _commit_checkin(state: Dict[str, Any], user_query: str, client_id: str) -> b
             db.add(visitor)
             db.flush()
 
+        # Resolve host to get name for the notes
         host_raw = state.get("meeting_with_raw")
         emp = _lookup_employee(host_raw)
+        host_display_name = emp.name if emp else host_raw or "Admin Team"
 
-        # IMPROVED LOGS: Reason and Type in the notes column
-        reason = state.get("purpose") or "Office Visit"
-        v_type = state.get("visitor_type", "Visitor/Guest")
-        db_notes = f"Visit Type: {v_type} | Reason: {reason}"
-        if host_raw:
-            db_notes += f" | Requested: {host_raw}"
+        # BETTER NOTES: Clear and concise
+        v_type = state.get("visitor_type", "Guest")
+        purpose = state.get("purpose") or "Meeting"
+        note_str = f"[{v_type}] Purpose: {purpose} | To see: {host_display_name}"
 
         log = ReceptionLog(
             visitor_id=visitor.id,
             employee_id=emp.id if emp else None,
             person_type=v_type,
             check_in_time=datetime.utcnow(),
-            purpose=reason,
-            notes=db_notes,
+            purpose=purpose,
+            notes=note_str,
         )
         db.add(log)
         db.commit()
 
-        # SLACK NOTIFICATION
+        # Slack logic
         if emp:
+            send_slack_arrival(emp.name, v_name, v_type, purpose, state["session_id"])
+        elif "admin" in user_query.lower() or "cafeteria" in user_query.lower():
             send_slack_arrival(
-                emp.name, v_name, state["visitor_type"], reason, state["session_id"]
-            )
-        elif "admin" in user_query.lower() or "ac" in user_query.lower():
-            # NOTIFY ADMIN TEAM specifically
-            send_slack_arrival(
-                "Admin Team", v_name, "Inquiry", reason, state["session_id"]
+                "Admin Team", v_name, v_type, purpose, state["session_id"]
             )
 
         return True
@@ -376,41 +372,44 @@ def _merge_checkin_entities(
 ) -> None:
     query_low = user_query.lower()
 
-    # PERSONA SWITCH DETECTION:
-    # If the state was "Guest" but now we hear "Delivery" keywords, wipe previous name.
-    is_delivery_now = any(k in query_low for k in DELIVERY_KEYWORDS) or entities.get(
-        "visitor_type"
-    ) in ["Delivery", "Food Delivery"]
-
-    if is_delivery_now and not state.get("is_delivery"):
-        # This was a guest session, but now it's a delivery. Reset the name!
-        state["visitor_name"] = None
-        state["is_delivery"] = True
-        state["is_employee"] = False
-
-    # Standard Merging
-    v_name = entities.get("visitor_name")
-    if v_name and v_name.lower() not in NAME_BLACKLIST:
-        state["visitor_name"] = v_name.capitalize()
-
-    # Visitor Type Priority Logic (Fixes "Internal Staff" issue)
+    # 1. PERSONA SWITCH: Priority for Company name in Deliveries
     v_type_extracted = entities.get("visitor_type")
+    is_delivery = any(
+        k in query_low for k in DELIVERY_KEYWORDS
+    ) or v_type_extracted in ["Delivery", "Food Delivery"]
+
+    if is_delivery:
+        # If it's a delivery, look for Company Names first (Zomato, Amazon, Swiggy)
+        for k in DELIVERY_KEYWORDS:
+            if k in query_low:
+                state["visitor_name"] = k.capitalize()
+                break
+        state["visitor_type"] = v_type_extracted or "Delivery"
+        state["is_delivery"] = True
+    else:
+        # Standard Person logic
+        v_name = entities.get("visitor_name")
+        if v_name and v_name.lower() not in NAME_BLACKLIST:
+            state["visitor_name"] = v_name.capitalize()
+
+    # 2. Fix the "Internal Staff" vs "Employee" naming consistency
     if v_type_extracted:
         state["visitor_type"] = v_type_extracted
 
-    # Manual overrides for accuracy
-    if "interview" in query_low:
-        state["visitor_type"] = "Interviewee"
-        state["is_employee"] = False
-    elif any(k in query_low for k in ["i work here", "staff", "employee"]):
-        state["visitor_type"] = "Internal Staff"
-        state["is_employee"] = True
+    # 3. Purpose Cleanup
+    raw_p = entities.get("purpose")
+    if raw_p and len(raw_p) > 2:
+        # Remove fluff like "notify someone"
+        clean_p = re.sub(
+            r"(notify|tell|ask|the|manager|about|arrival)",
+            "",
+            raw_p,
+            flags=re.IGNORECASE,
+        ).strip()
+        state["purpose"] = clean_p or raw_p
 
     if entities.get("employee_name"):
         state["meeting_with_raw"] = entities["employee_name"]
-
-    if entities.get("purpose"):
-        state["purpose"] = entities["purpose"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -10,7 +10,7 @@ from groq import AsyncGroq
 
 logger = logging.getLogger(__name__)
 
-MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 AI_NAME = "Jarvis"
 COMPANY_NAME = "Sharp Software Development India Private Limited."
 
@@ -52,16 +52,15 @@ Output format:
     "visitor_name": string | null,
     "employee_name": string | null,
     "purpose": string | null,
-    "visitor_type": "Employee" | "Interviewee" | "Delivery" | "Food Delivery" | "Client" | "Guest"
+    "visitor_type": "Employee" | "Interviewee" | "Delivery" | "Food Delivery" | "Contractor/Vendor" | "Client" | "Guest"
   }
 }
 
 RULES:
-- "I work here" / "I am the manager" -> visitor_type: "Employee"
-- "I am here for an interview" / "Candidate" -> visitor_type: "Interviewee"
-- "Swiggy/Zomato/Food" -> visitor_type: "Food Delivery"
-- "Amazon/Package/Parcel" -> visitor_type: "Delivery"
-- "I'm here to see [Name]" -> intent: "check_in"
+- "visitor_name": Capture the person's name OR the company (Urban Company, Zomato).
+- "purpose": Capture ONLY the objective (e.g., "fix water purifier", "delivery", "interview"). Do NOT include phrases like "notify manager".
+- "Interviewee": Use this for anyone coming for an interview.
+- "Contractor/Vendor": Use for repair/maintenance staff.
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
