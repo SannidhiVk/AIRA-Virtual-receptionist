@@ -12,11 +12,6 @@
 [![CUDA](https://img.shields.io/badge/CUDA-12.4-76B900.svg)](https://developer.nvidia.com/cuda-toolkit)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-
-## 🎥 Demo Video
-
-[![TalkMateAI Demo](https://img.youtube.com/vi/dE_8TXmp2Sk/maxresdefault.jpg)](https://www.youtube.com/watch?v=dE_8TXmp2Sk)
-
 ## ✨ Features
 
 ### 🎯 **Core Capabilities**
@@ -130,10 +125,3 @@ pnpm dev:server  # Backend (http://localhost:8000)
 
 ---
 
-<div align="center">
-
-**⭐ Star this repo if you find it useful! ⭐**
-
-Made with ❤️ by the Kiranbaby14
-
-</div>
