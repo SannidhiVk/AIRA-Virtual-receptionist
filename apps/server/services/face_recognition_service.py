@@ -13,14 +13,6 @@ HOW IT WORKS:
    c) Saves the live frame to a captures folder for cross-verification
    d) Returns a structured result: { verified, distance, message }
 
-WHY DeepFace + Facenet512:
-- pip install only — no cmake/dlib build issues on Windows
-- Facenet512 gives ~99.6% LFW accuracy, better than Facenet128
-- Works fully on CPU (no GPU needed)
-- enforce_detection=False = graceful fallback when face is partially out of frame
-- Captures are saved to receptionist/photos/captures/ so you can visually
-  inspect what the camera actually sent and compare against the stored photo.
-
 TROUBLESHOOTING distance ≈ 1.0 (guaranteed mismatch):
 - Distance of 1.082 (>1.0) means face was NOT detected in one or both images.
   DeepFace then compares raw pixel embeddings → always huge distance.
@@ -37,6 +29,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+import numpy as np
 
 # --- ADD THESE TWO LINES ---
 from dotenv import load_dotenv
@@ -75,6 +68,32 @@ def _ensure_photos_dir() -> None:
 def get_photo_path(employee_id: int) -> Path:
     """Return the expected disk path for an employee's stored photo."""
     return PHOTOS_DIR / f"{employee_id}.jpg"
+
+
+def warmup_deepface():
+    """
+    Runs a dummy verification in the background on startup.
+    This forces TensorFlow and the ArcFace/MTCNN models to load into memory
+    so the first user doesn't experience a 40-second delay.
+    """
+    logger.info("Starting DeepFace warmup sequence in the background...")
+    try:
+        from deepface import DeepFace
+
+        # Create a dummy blank 224x224 image
+        dummy_img = np.zeros((224, 224, 3), dtype=np.uint8)
+
+        # Run a fake verification with enforce_detection=False so it doesn't crash on the blank image
+        DeepFace.verify(
+            img1_path=dummy_img,
+            img2_path=dummy_img,
+            model_name=MODEL_NAME,
+            detector_backend=DETECTOR_BACKEND,
+            enforce_detection=False,
+        )
+        logger.info("✅ DeepFace warmup complete! Live requests will now be fast.")
+    except Exception as e:
+        logger.warning(f"DeepFace warmup failed: {e}")
 
 
 def _save_capture(

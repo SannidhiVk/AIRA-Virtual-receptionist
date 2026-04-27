@@ -19,13 +19,20 @@ from models.whisper_processor import WhisperProcessor
 from models.tts_processor import KokoroTTSProcessor
 from services.processor_service import process_text_for_client
 from services.wake_word_service import get_wake_word_service
-from services.face_recognition_service import verify_employee_face
+
+# --- Other imports remain the same ---
+from services.face_recognition_service import verify_employee_face, warmup_deepface
 
 # Thread pool for running blocking DeepFace calls without blocking the async event loop
 _face_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="deepface")
 
+# Trigger model warmup immediately when the server file is loaded
+_face_executor.submit(warmup_deepface)
+
 logging.basicConfig(
-    level=logging.DEBUG, format="%(asctime)s[%(levelname)s] %(name)s: %(message)s"
+    # ... rest of your code ...
+    level=logging.DEBUG,
+    format="%(asctime)s[%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -260,18 +267,24 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                             )
 
                             # Send result back to frontend (for the UI badge)
-                            await websocket.send_text(
-                                json.dumps(
-                                    {
-                                        "type": "face_verification_result",
-                                        "verified": result["verified"],
-                                        "distance": result["distance"],
-                                        "audio_name": audio_name,
-                                        "has_photo": result["has_photo"],
-                                        "message": result.get("message", ""),
-                                    }
+                            try:
+                                await websocket.send_text(
+                                    json.dumps(
+                                        {
+                                            "type": "face_verification_result",
+                                            "verified": result["verified"],
+                                            "distance": result["distance"],
+                                            "audio_name": audio_name,
+                                            "has_photo": result["has_photo"],
+                                            "message": result.get("message", ""),
+                                        }
+                                    )
                                 )
-                            )
+                            except Exception as e:
+                                logger.warning(
+                                    f"[{client_id}] Could not send face result. Client likely disconnected. Error: {e}"
+                                )
+                                break
 
                             # Speak verification result when a comparison was made.
                             # - mismatch => verbal challenge
