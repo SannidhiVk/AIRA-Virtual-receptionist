@@ -13,13 +13,6 @@ HOW IT WORKS:
    c) Saves the live frame to a captures folder for cross-verification
    d) Returns a structured result: { verified, distance, message }
 
-WHY DeepFace + Facenet512:
-- pip install only — no cmake/dlib build issues on Windows
-- Facenet512 gives ~99.6% LFW accuracy, better than Facenet128
-- Works fully on CPU (no GPU needed)
-- enforce_detection=False = graceful fallback when face is partially out of frame
-- Captures are saved to receptionist/photos/captures/ so you can visually
-  inspect what the camera actually sent and compare against the stored photo.
 
 TROUBLESHOOTING distance ≈ 1.0 (guaranteed mismatch):
 - Distance of 1.082 (>1.0) means face was NOT detected in one or both images.
