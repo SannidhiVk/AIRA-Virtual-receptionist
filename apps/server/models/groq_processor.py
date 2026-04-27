@@ -129,13 +129,25 @@ def _get_all_groq_keys() -> List[str]:
 
 def _build_system_message(company_info: Optional[dict] = None) -> str:
     """Constructs the final system prompt with current time and company context."""
-    current_time = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
+    now = datetime.now()
+    current_time_str = now.strftime("%A, %B %d, %Y at %I:%M %p")
+
+    # CALCULATE GREETING ONCE HERE
+    hour = now().hour
+    if 5 <= hour < 12:
+        greeting = "Good Morning"
+    elif 12 <= hour < 17:
+        greeting = "Good Afternoon"
+    else:
+        greeting = "Good Evening"
 
     system = (
         BASE_SYSTEM_PROMPT
-        + f"\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCURRENT DATE & TIME\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n{current_time}"
+        + f"\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        + f"CURRENT GREETING: {greeting}\n"  # FORCE THE GREETING
+        + f"CURRENT DATE & TIME: {current_time_str}\n"
+        + f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     )
-
     if company_info:
         system += "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCOMPANY CONTEXT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         if company_info.get("company_name"):
@@ -173,6 +185,14 @@ def _clean_reply(text: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # GROQ PROCESSOR CLASS (WITH ACCOUNT ROTATION)
 # ─────────────────────────────────────────────────────────────────────────────
+def _get_current_greeting() -> str:
+    hour = datetime.now().hour
+    if 5 <= hour < 12:
+        return "Good Morning"
+    elif 12 <= hour < 17:
+        return "Good Afternoon"
+    else:
+        return "Good Evening"
 
 
 class GroqProcessor:
