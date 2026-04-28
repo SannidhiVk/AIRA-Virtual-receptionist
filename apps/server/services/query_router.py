@@ -56,15 +56,24 @@ PRONOUNS = {
     "this guy",
     "this person",
 }
-DELIVERY_KEYWORDS = {
+FOOD_DELIVERY_KEYWORDS = {
     "zomato",
     "swiggy",
+    "food",
+    "bistro",
+    "blinkit",
+    "danzo",
+}
+
+PACKAGE_DELIVERY_KEYWORDS = {
     "amazon",
     "flipkart",
+    "ajio",
+    "savana",
     "delivery",
     "parcel",
-    "food",
     "courier",
+    "toing",
 }
 
 
@@ -158,14 +167,27 @@ def _is_jarvis(name: str) -> bool:
 
 def _determine_visitor_type(text: str, purpose: str, current_type: str) -> str:
     combined = f"{text} {purpose}".lower()
+
     if re.search(r"\b(interview|candidate)\b", combined):
         return "Interviewee"
-    if any(k in combined for k in DELIVERY_KEYWORDS):
-        return "Delivery"
-    if re.search(r"\b(vendor|electrician|plumber|maintenance)\b", combined):
+
+    # --- Checks the Food list ---
+    if any(k in combined for k in FOOD_DELIVERY_KEYWORDS):
+        return "Food Delivery"
+
+    # --- Checks the Package list ---
+    if any(k in combined for k in PACKAGE_DELIVERY_KEYWORDS):
+        return "Package Delivery"
+
+    # --- Expanded Maintenance list ---
+    if re.search(
+        r"\b(vendor|electrician|plumber|maintenance|ac|fix|leak|broken)\b", combined
+    ):
         return "Contractor/Vendor"
+
     if re.search(r"\b(client|customer|demo)\b", combined):
         return "Client"
+
     return current_type or "Visitor/Guest"
 
 
@@ -288,18 +310,17 @@ def _merge_checkin_entities(
         state["sched_purpose"] = entities["purpose"]
         state["purpose"] = entities["purpose"]
 
-    # 4. ATTENDEE LOOP KILLER (File A)
-    if any(
-        p in query_low
-        for p in ["only me", "just us", "no one else", "just me", "no", "nobody"]
-    ):
-        state["attendees_finalized"] = True
-
     # 5. VISITOR TYPE MAPPING (File A)
     if "interview" in query_low:
         state["visitor_type"] = "Interviewee"
-    elif any(k in query_low for k in DELIVERY_KEYWORDS):
-        state["visitor_type"] = "Delivery"
+    # --- Checks the Food list ---
+    elif any(k in query_low for k in FOOD_DELIVERY_KEYWORDS):
+        state["visitor_type"] = "Food Delivery"
+        state["purpose"] = "Dropping off food"
+    # --- Checks the Package list ---
+    elif any(k in query_low for k in PACKAGE_DELIVERY_KEYWORDS):
+        state["visitor_type"] = "Package Delivery"
+        state["purpose"] = "Dropping off a package"
     # Expand the maintenance list:
     elif any(
         k in query_low
@@ -426,12 +447,6 @@ async def _llm_reply(
 ) -> str:
     llm = GroqProcessor.get_instance()
 
-    hour = datetime.now().hour
-    greeting = (
-        "Good Morning"
-        if hour < 12
-        else "Good Afternoon" if hour < 17 else "Good Evening"
-    )
     # Strictly define the roles for the LLM
     visitor = state.get("visitor_name") or "Unknown Visitor"
     host = (
@@ -441,7 +456,6 @@ async def _llm_reply(
     )
 
     info_block = f"""
-    - TIME OF DAY: {greeting} 
     - YOU ARE TALKING TO: {visitor} (The Visitor)
     - THEY WANT TO SEE: {host} (The Employee/Host)
     - STATUS: {'Meeting Scheduled' if state['conv_state'] == State.COMPLETED else 'Collecting Info'}
@@ -502,40 +516,23 @@ async def _handle_scheduling(
     entities: Dict[str, Any],
     intent: str,
 ) -> str:
-    query_low = user_query.lower()
+    """Restored the strict, step-by-step logic from File A"""
 
-    if not state.get("sched_employee_name"):
-        host_input = state.get("sched_employee_raw") or entities.get("employee_name")
-        if host_input:
-            emp = _lookup_employee(host_input)
-            if emp:
-                state["sched_employee_name"] = emp.name
-                state["sched_employee_email"] = emp.email
-            else:
-                return await _llm_reply(
-                    f"I couldn't find {host_input} in our directory. Who would you like to meet?",
-                    state,
-                    user_query,
-                    client_id,
-                )
-        else:
-            return await _llm_reply(
-                "Who would you like to schedule a meeting with?",
-                state,
-                user_query,
-                client_id,
-            )
+    # Sync meeting_with_raw to sched_employee_raw as a fallback
+    if not state.get("sched_employee_raw") and state.get("meeting_with_raw"):
+        state["sched_employee_raw"] = state["meeting_with_raw"]
 
-    # Time Validation (File B)
+    # 1. SMART TIME VALIDATION
     if state["sched_date"] and state["sched_time"]:
+        now = datetime.now()
         try:
             sched_dt = datetime.strptime(
                 f"{state['sched_date']} {state['sched_time']}", "%Y-%m-%d %H:%M"
             )
-            if sched_dt < datetime.now():
-                state["sched_time"] = None
+            if sched_dt < now:
+                state["sched_time"] = None  # Wipe the past time
                 return await _llm_reply(
-                    "Explain that this time is in the past and ask for a valid time.",
+                    "Explain that the time is in the past and ask for a valid time.",
                     state,
                     user_query,
                     client_id,
@@ -543,40 +540,63 @@ async def _handle_scheduling(
         except:
             pass
 
-    # Loop Killer (File A)
-    if not state.get("attendees_finalized"):
+    # 2. SHORT-CIRCUIT: Check for missing data in logical order
+    if not state.get("visitor_name") and not state.get("is_employee"):
         return await _llm_reply(
-            f"I've noted the meeting with {state['sched_employee_name']}. Will anyone else be joining you?",
+            "Ask for their name politely.", state, user_query, client_id
+        )
+
+    if not state.get("sched_employee_raw"):
+        return await _llm_reply(
+            "Ask who they want to schedule the meeting with.",
             state,
             user_query,
             client_id,
         )
+
+    if not state.get("sched_employee_name"):
+        emp = _lookup_employee(state["sched_employee_raw"])
+        if emp:
+            state["sched_employee_name"] = emp.name
+            state["sched_employee_email"] = emp.email
+        else:
+            state["sched_employee_name"] = state["sched_employee_raw"]
 
     if not state.get("sched_date"):
         return await _llm_reply(
-            f"What date works for {state['sched_employee_name']}?",
+            "Ask for the date of the meeting.", state, user_query, client_id
+        )
+    if not state.get("sched_time"):
+        return await _llm_reply(
+            "Ask for the time of the meeting.", state, user_query, client_id
+        )
+    if not state.get("sched_purpose"):
+        return await _llm_reply(
+            "Ask for the purpose of the meeting.", state, user_query, client_id
+        )
+
+    # 3. ACTION & CONFIRMATION
+    if intent == "confirm" or any(
+        w in user_query.lower() for w in ["yes", "yeah", "correct", "confirm", "sure"]
+    ):
+        # Finalize using File B's robust DB commit
+        _commit_meeting_to_db(state)
+
+        state["scheduling_active"] = False
+        state["conv_state"] = State.COMPLETED
+        return await _llm_reply(
+            "Confirm the booking is successful and you have sent a calendar invite.",
             state,
             user_query,
             client_id,
         )
-    if not state.get("sched_time"):
-        return await _llm_reply(
-            f"What time on {state['sched_date']}?", state, user_query, client_id
-        )
 
-    # Confirm & Commit
-    if intent == "confirm" or any(
-        x in query_low for x in ["yes", "correct", "confirm"]
-    ):
-        if _commit_meeting_to_db(state):
-            v_name = state.get("visitor_name") or "there"
-            res = f"Perfect, {v_name}. I've scheduled your meeting and sent a calendar invite to {state['sched_employee_name']}. Have a great day!"
-            clear_session_state(client_id)
-            return res
-
-    summary = f"meeting with {state['sched_employee_name']} on {state['sched_date']} at {state['sched_time']}"
+    state["sched_pending_confirm"] = True
     return await _llm_reply(
-        f"Summarize: {summary}. Ask the user to confirm.", state, user_query, client_id
+        "Summarize the meeting details and ask for confirmation.",
+        state,
+        user_query,
+        client_id,
     )
 
 
