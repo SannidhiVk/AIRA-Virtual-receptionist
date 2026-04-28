@@ -51,6 +51,9 @@ def create_wav_from_pcm(pcm_bytes: bytes, sample_rate: int = SAMPLE_RATE) -> byt
 @router.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
     await manager.connect(websocket, client_id)
+    from services.query_router import clear_session_state
+
+    clear_session_state(client_id)
     whisper_processor = WhisperProcessor.get_instance()
     tts_processor = KokoroTTSProcessor.get_instance()
     text_queue: asyncio.Queue[str] = asyncio.Queue()

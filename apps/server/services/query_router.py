@@ -234,36 +234,36 @@ def _lookup_employee(search_term: str) -> Optional[Any]:
     clean = search_term.strip().lower()
     db = SessionLocal()
     try:
-        # Step 1: Exact Name/Role/Dept Match (File A Logic)
-        emp = (
-            db.query(Employee)
-            .filter(
-                or_(
-                    Employee.name.ilike(f"%{clean}%"),
-                    Employee.role.ilike(f"%{clean}%"),
-                    Employee.department.ilike(f"%{clean}%"),
-                )
-            )
-            .first()
-        )
+        # 1. Try exact name match
+        emp = db.query(Employee).filter(Employee.name.ilike(clean)).first()
 
-        # Step 2: Fallbacks (File A)
+        # 2. Try partial name/role match
+        if not emp:
+            emp = (
+                db.query(Employee)
+                .filter(
+                    or_(
+                        Employee.name.ilike(f"%{clean}%"),
+                        Employee.role.ilike(f"%{clean}%"),
+                    )
+                )
+                .first()
+            )
+
+        # 3. Department fallbacks
         if not emp:
             if "hr" in clean:
                 emp = db.query(Employee).filter(Employee.department.ilike("hr")).first()
-            elif "sales" in clean:
+            elif "finance" in clean:  # Added Finance for Ravi
                 emp = (
                     db.query(Employee)
-                    .filter(Employee.department.ilike("sales"))
-                    .first()
-                )
-            elif "admin" in clean:
-                emp = (
-                    db.query(Employee)
-                    .filter(Employee.department.ilike("admin"))
+                    .filter(Employee.department.ilike("finance"))
                     .first()
                 )
         return emp
+    except Exception as e:
+        logger.error(f"DB Lookup Error: {e}")
+        return None
     finally:
         db.close()
 
@@ -447,32 +447,38 @@ async def _llm_reply(
 ) -> str:
     llm = GroqProcessor.get_instance()
 
-    # Strictly define the roles for the LLM
-    visitor = state.get("visitor_name") or "Unknown Visitor"
-    host = (
+    visitor = state.get("visitor_name") or "the visitor"
+    # Get host details or default
+    host_name = (
         state.get("meeting_with_resolved")
-        or state.get("sched_employee_name")
-        or "Administration Team"
+        or state.get("meeting_with_raw")
+        or "the relevant person"
     )
 
-    info_block = f"""
-    - YOU ARE TALKING TO: {visitor} (The Visitor)
-    - THEY WANT TO SEE: {host} (The Employee/Host)
-    - STATUS: {'Meeting Scheduled' if state['conv_state'] == State.COMPLETED else 'Collecting Info'}
-    - COLLECTED DATE: {state.get('sched_date') or 'None'}
-    - COLLECTED TIME: {state.get('sched_time') or 'None'}
-    """
+    # Determine the specific instruction based on visitor type
+    v_type = state.get("visitor_type", "Guest")
+    delivery_instruction = ""
+    if "Delivery" in v_type:
+        delivery_instruction = "IMPORTANT: Instruct the person to leave the package/food at the reception desk."
+    else:
+        delivery_instruction = "Instruct the visitor to take a seat in the lobby area."
 
     prompt = f"""
     {BASE_SYSTEM_PROMPT}
-    KNOWLEDGE BASE:
-    {info_block}
+    CONTEXT:
+    - Current Visitor: {visitor}
+    - Visitor Category: {v_type}
+    - Visiting: {host_name}
+    - {delivery_instruction}
+
+    TASK: {situation}
+    USER INPUT: "{user_query}"
 
     STRICT RULES:
-    1. The person you are speaking to is {visitor}. NEVER call them {host}.
-    2. If an item in 'KNOWLEDGE BASE' is NOT 'None', do NOT ask for it.
-    3. GOAL: {situation}
-    4. USER SAID: "{user_query}"
+    1. Do not greet again. 
+    2. If it's a delivery, tell them to leave it at the desk.
+    3. If they are meeting someone, tell them they've been notified.
+    4. Be extremely concise (max 2 sentences).
     """
     return await llm.get_raw_response(prompt, client_id=client_id)
 
@@ -666,34 +672,48 @@ async def route_query(client_id: str, user_query: str) -> str:
 async def _advance_checkin(
     state: Dict[str, Any], user_query: str, client_id: str
 ) -> str:
-    # Resolve host
-    host = state.get("meeting_with_resolved") or state.get("meeting_with_raw")
-    if not host and state.get("meeting_with_raw"):
+    # 1. Try to resolve host if not already done
+    if not state.get("meeting_with_resolved") and state.get("meeting_with_raw"):
         emp = _lookup_employee(state["meeting_with_raw"])
         if emp:
             state["meeting_with_resolved"] = emp.name
-            host = emp.name
+            # If we find the employee, we can update the visitor type
+            if state.get("visitor_type") == "Visitor/Guest":
+                state["visitor_type"] = "Guest"
 
-    # Check for Identity Switch or Arrival (File A)
-    if state.get("visitor_name") and host:
-        if state["conv_state"] != State.COMPLETED or state.get("identity_updated"):
-            _commit_checkin(state, client_id, user_query)
-            state["conv_state"] = State.COMPLETED
-            state["identity_updated"] = False
+    host = state.get("meeting_with_resolved") or state.get("meeting_with_raw")
+    v_name = state.get("visitor_name")
+
+    # 2. Logic for missing name
+    if not v_name:
         return await _llm_reply(
-            f"Acknowledge arrival. Confirm {host} has been notified via Slack.",
-            state,
-            user_query,
-            client_id,
+            "Politely ask the visitor for their name.", state, user_query, client_id
         )
 
-    if not state.get("visitor_name"):
-        return await _llm_reply("Ask for their name.", state, user_query, client_id)
+    # 3. Logic for missing host
     if not host:
         return await _llm_reply(
-            "Ask who they are here to see.", state, user_query, client_id
+            "Ask who they are here to meet.", state, user_query, client_id
         )
-    return await _llm_reply("Assist with check-in.", state, user_query, client_id)
+
+    # 4. Success State: Commit to DB and Notify
+    if state["conv_state"] != State.COMPLETED:
+        success = _commit_checkin(state, client_id, user_query)
+        if not success:
+            # Fallback instead of crashing if DB fails
+            return "I've noted your arrival and will inform them immediately. Please wait a moment."
+        state["conv_state"] = State.COMPLETED
+
+    # Build the success situation
+    v_type = state.get("visitor_type", "")
+    if "Delivery" in v_type:
+        situation = (
+            f"Tell them to leave the delivery at the desk. Confirm {host} was notified."
+        )
+    else:
+        situation = f"Confirm {host} has been notified via Slack and tell them to wait in the lobby."
+
+    return await _llm_reply(situation, state, user_query, client_id)
 
 
 async def _complete_checkin(
