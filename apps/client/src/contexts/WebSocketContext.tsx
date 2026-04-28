@@ -36,6 +36,14 @@ interface WebSocketMessage {
   audio_name?: string;
   has_photo?: boolean;
   message?: string;
+  person_type?: 'employee' | 'visitor';
+  session_action?: 'capture_reference' | 'compare_reference';
+  reference_captured?: boolean;
+}
+
+export interface FaceVerificationRequestOptions {
+  personType?: 'employee' | 'visitor';
+  sessionAction?: 'capture_reference' | 'compare_reference';
 }
 
 interface WebSocketContextType {
@@ -65,7 +73,11 @@ interface WebSocketContextType {
       state: 'passive' | 'listening' | 'processing' | 'speaking'
     ) => void
   ) => void;
-  sendFaceVerificationRequest?: (audioName: string, imageB64: string) => void;
+  sendFaceVerificationRequest?: (
+    audioName: string,
+    imageB64: string,
+    options?: FaceVerificationRequestOptions
+  ) => void;
   onVerificationResult?: (callback: (data: WebSocketMessage) => void) => void;
   onEmployeeIdentified?: (callback: (employeeName: string) => void) => void;
 }
@@ -312,16 +324,28 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
   );
 
   const sendFaceVerificationRequest = useCallback(
-    (audioName: string, imageB64: string) => {
+    (
+      audioName: string,
+      imageB64: string,
+      options?: FaceVerificationRequestOptions
+    ) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
+        const personType = options?.personType ?? 'employee';
+        const sessionAction =
+          options?.sessionAction ??
+          (personType === 'visitor' ? 'compare_reference' : undefined);
         wsRef.current.send(
           JSON.stringify({
             type: 'verify_face',
             audio_name: audioName,
-            image_b64: imageB64
+            image_b64: imageB64,
+            person_type: personType,
+            ...(sessionAction ? { session_action: sessionAction } : {})
           })
         );
-        console.log(`Sent face verification request for: ${audioName}`);
+        console.log(
+          `Sent face verification request for: ${audioName} (${personType}${sessionAction ? `:${sessionAction}` : ''})`
+        );
       }
     },
     []

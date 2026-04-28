@@ -19,13 +19,20 @@ from models.whisper_processor import WhisperProcessor
 from models.tts_processor import KokoroTTSProcessor
 from services.processor_service import process_text_for_client
 from services.wake_word_service import get_wake_word_service
-from services.face_recognition_service import verify_employee_face
+
+# --- Other imports remain the same ---
+from services.face_recognition_service import verify_person_face, warmup_deepface
 
 # Thread pool for running blocking DeepFace calls without blocking the async event loop
 _face_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="deepface")
 
+# Trigger model warmup immediately when the server file is loaded
+_face_executor.submit(warmup_deepface)
+
 logging.basicConfig(
-    level=logging.DEBUG, format="%(asctime)s[%(levelname)s] %(name)s: %(message)s"
+    # ... rest of your code ...
+    level=logging.DEBUG,
+    format="%(asctime)s[%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -44,6 +51,93 @@ MAX_SILENCE_MS = 1200
 FOLLOWUP_TIMEOUT_SECONDS = float(os.getenv("FOLLOWUP_TIMEOUT", "12.0"))
 
 
+_NAME_STOPWORDS = frozenset(
+    {
+        "i",
+        "i'm",
+        "im",
+        "it",
+        "it's",
+        "its",
+        "i've",
+        "ive",
+        "hello",
+        "hi",
+        "hey",
+        "sorry",
+        "so",
+        "not",
+        "no",
+        "yes",
+        "me",
+        "my",
+        "is",
+        "am",
+        "are",
+        "was",
+        "the",
+        "a",
+        "an",
+        "here",
+        "there",
+        "this",
+        "that",
+        "just",
+        "now",
+        "please",
+        "name",
+        "call",
+        "called",
+        "actually",
+        "really",
+        "well",
+        "oh",
+        "ah",
+        "um",
+        "uh",
+        "ok",
+        "okay",
+    }
+)
+
+# Keywords that indicate the speaker is a visitor/delivery person, not an employee
+_VISITOR_KEYWORDS = (
+    "delivery",
+    "courier",
+    "package",
+    "parcel",
+    "swiggy",
+    "zomato",
+    "amazon",
+    "flipkart",
+    "dunzo",
+    "porter",
+    "blinkit",
+    "zepto",
+    "visitor",
+    "guest",
+    "appointment",
+    "here to meet",
+    "here to see",
+    "meeting with",
+    "visiting",
+    "i have a delivery",
+    "drop off",
+)
+
+
+def _detect_person_type(text: str) -> str:
+    """
+    Returns 'visitor' if the transcript contains delivery/visitor keywords,
+    otherwise returns 'employee'.
+    """
+    lower = text.lower()
+    for keyword in _VISITOR_KEYWORDS:
+        if keyword in lower:
+            return "visitor"
+    return "employee"
+
+
 def _extract_spoken_name(text: str) -> str | None:
     """
     Try to extract a candidate name from phrases like:
@@ -51,6 +145,7 @@ def _extract_spoken_name(text: str) -> str | None:
       - "I am John Doe"
       - "This is John Doe"
       - "My name is John Doe"
+      - "Lucy here" / "It's Lucy here"
     """
     if not text:
         return None
@@ -62,12 +157,19 @@ def _extract_spoken_name(text: str) -> str | None:
         rf"\b(?:i am|i'm)\s+{name_pattern}",
         rf"\bmy name is\s+{name_pattern}",
         rf"\bthis is\s+{name_pattern}",
-        rf"\b{name_pattern}\s+here\b",
+        rf"\bit'?s\s+{name_pattern}",
+        # "Lucy here" — only ONE word before 'here', not two
+        rf"\b([a-zA-Z.'-]+)\s+here\b",
     ]
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
-            return match.group(1).strip(" .,!?:;")
+            name = match.group(1).strip(" .,!?:;")
+            # Strip trailing "here" if captured (e.g. "I'm Husha here" → "Husha here" → "Husha")
+            name = re.sub(r"\s+here$", "", name, flags=re.IGNORECASE).strip()
+            # Reject if the captured word is itself a stopword
+            if name.lower() not in _NAME_STOPWORDS and len(name) >= 2:
+                return name
 
     # Fallback for short direct intros like "John" or "John Doe".
     cleaned = re.sub(r"[^a-zA-Z\s.'-]", " ", text).strip()
@@ -75,12 +177,7 @@ def _extract_spoken_name(text: str) -> str | None:
         words = [w for w in cleaned.split() if w]
         # If the whole utterance is very short (1-3 words)
         if 1 <= len(words) <= 3:
-            # Filter out common greeting words
-            name_words = [
-                w
-                for w in words
-                if w.lower() not in ("hi", "hello", "hey", "it", "is", "me")
-            ]
+            name_words = [w for w in words if w.lower() not in _NAME_STOPWORDS]
             if 1 <= len(name_words) <= 2:
                 return " ".join(name_words)
     return None
@@ -109,17 +206,8 @@ def _candidate_names_from_transcript(text: str) -> list[str]:
     # This catches cases where the regex misses but the name is clearly spoken.
     capitalized_words = re.findall(r"\b[A-Z][a-z.\'-]+\b", text)
     for cw in capitalized_words:
-        if cw.lower() not in (
-            "i",
-            "hello",
-            "hi",
-            "hey",
-            "my",
-            "name",
-            "is",
-            "this",
-            "here",
-        ):
+        # Must be at least 3 chars and not a stopword to count as a name candidate
+        if len(cw) >= 3 and cw.lower() not in _NAME_STOPWORDS:
             candidates.append(cw)
 
     # Preserve order while removing duplicates.
@@ -135,6 +223,12 @@ def _candidate_names_from_transcript(text: str) -> list[str]:
 
 
 def _resolve_employee_name(candidate_name: str) -> str | None:
+    # Reject obvious non-names before touching the DB to prevent fuzzy false matches
+    # e.g. "I'm" fuzzy-matching to "Jim"
+    if not candidate_name or len(candidate_name) < 3:
+        return None
+    if candidate_name.lower() in _NAME_STOPWORDS:
+        return None
     try:
         from receptionist.database import get_employee_by_name
 
@@ -162,7 +256,14 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     whisper_processor = WhisperProcessor.get_instance()
     tts_processor = KokoroTTSProcessor.get_instance()
     text_queue: asyncio.Queue[str] = asyncio.Queue()
-    session_state = {"mode": "PASSIVE", "awaiting_face": False, "is_verified": False}
+    session_state = {
+        "mode": "PASSIVE",
+        "awaiting_face": False,
+        "is_verified": False,
+        "visitor_reference_image_b64": None,
+        "pending_identity_name": None,
+        "person_type": "employee",  # "employee" or "visitor"
+    }
 
     try:
         await websocket.send_text(
@@ -209,6 +310,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     audio_buffer.clear()
                     speech_seen = False
                     session_state["is_verified"] = False
+                    session_state["visitor_reference_image_b64"] = None
+                    session_state["pending_identity_name"] = None
+                    session_state["person_type"] = "employee"
 
                     try:
                         ww_service.model.reset()
@@ -238,21 +342,80 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         if msg.get("type") == "verify_face":
                             audio_name = msg.get("audio_name", "")
                             image_b64 = msg.get("image_b64", "")
+                            # Always trust server-side session_state over frontend-sent person_type
+                            # (frontend may be hardcoded to "employee")
+                            person_type = session_state.get("person_type", "employee")
+                            session_action = msg.get("session_action") or (
+                                "capture_reference"
+                                if person_type == "visitor"
+                                else "compare_reference"
+                            )
                             session_state["awaiting_face"] = False
                             logger.info(
-                                f"[{client_id}] Face verification requested for: '{audio_name}'"
+                                f"[{client_id}] Face verification requested for: '{audio_name}' "
+                                f"(person_type={person_type}, action={session_action})"
                             )
+
+                            if (
+                                person_type == "visitor"
+                                and session_action == "capture_reference"
+                            ):
+                                session_state["visitor_reference_image_b64"] = image_b64
+                                try:
+                                    await websocket.send_text(
+                                        json.dumps(
+                                            {
+                                                "type": "face_verification_result",
+                                                "verified": True,
+                                                "distance": -1.0,
+                                                "audio_name": audio_name,
+                                                "has_photo": True,
+                                                "message": "",
+                                                "person_type": person_type,
+                                                "session_action": session_action,
+                                                "reference_captured": True,
+                                            }
+                                        )
+                                    )
+                                except Exception as e:
+                                    logger.warning(
+                                        f"[{client_id}] Could not send visitor reference result. Error: {e}"
+                                    )
+                                    break
+                                pending_text = session_state.get("pending_text")
+                                if pending_text:
+                                    await text_queue.put(pending_text)
+                                    session_state["pending_text"] = None
+                                else:
+                                    # Fallback: reset mode so the server isn't permanently deaf
+                                    session_state["mode"] = "PASSIVE"
+                                    await websocket.send_text(json.dumps({"state": "passive"}))
+                                continue
+
+                            reference_image_b64 = ""
+                            if person_type == "visitor":
+                                reference_image_b64 = (
+                                    session_state.get("visitor_reference_image_b64")
+                                    or ""
+                                )
 
                             # Run DeepFace in a thread pool (it's blocking/CPU-intensive)
                             loop = asyncio.get_event_loop()
                             result = await loop.run_in_executor(
                                 _face_executor,
-                                verify_employee_face,
-                                audio_name,
-                                image_b64,
+                                lambda: verify_person_face(
+                                    person_type=person_type,
+                                    audio_name=audio_name,
+                                    image_b64=image_b64,
+                                    reference_image_b64=reference_image_b64,
+                                ),
                             )
                             if result.get("verified"):
                                 session_state["is_verified"] = True
+                                session_state["pending_identity_name"] = None
+                            elif person_type == "employee":
+                                session_state["is_verified"] = False
+                                session_state["pending_identity_name"] = audio_name
 
                             logger.info(
                                 f"[{client_id}] Face verify result for '{audio_name}': "
@@ -260,18 +423,26 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                             )
 
                             # Send result back to frontend (for the UI badge)
-                            await websocket.send_text(
-                                json.dumps(
-                                    {
-                                        "type": "face_verification_result",
-                                        "verified": result["verified"],
-                                        "distance": result["distance"],
-                                        "audio_name": audio_name,
-                                        "has_photo": result["has_photo"],
-                                        "message": result.get("message", ""),
-                                    }
+                            try:
+                                await websocket.send_text(
+                                    json.dumps(
+                                        {
+                                            "type": "face_verification_result",
+                                            "verified": result["verified"],
+                                            "distance": result["distance"],
+                                            "audio_name": audio_name,
+                                            "has_photo": result["has_photo"],
+                                            "message": result.get("message", ""),
+                                            "person_type": person_type,
+                                            "session_action": session_action,
+                                        }
+                                    )
                                 )
-                            )
+                            except Exception as e:
+                                logger.warning(
+                                    f"[{client_id}] Could not send face result. Client likely disconnected. Error: {e}"
+                                )
+                                break
 
                             # Speak verification result when a comparison was made.
                             # - mismatch => verbal challenge
@@ -293,6 +464,8 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         if msg.get("action") == "stop_speaking":
                             session_state["mode"] = "PASSIVE"
                             session_state["awaiting_face"] = False
+                            session_state["visitor_reference_image_b64"] = None
+                            session_state["pending_identity_name"] = None
                             await websocket.send_text(json.dumps({"state": "passive"}))
                     except Exception:
                         pass
@@ -391,36 +564,75 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                 if text and text not in ("NOISE_DETECTED", "NO_SPEECH"):
                                     employee_name = None
 
-                                    # --- CHANGE 4: ONLY check for names if the user hasn't been verified yet ---
                                     if not session_state.get("is_verified"):
+                                        # ── Detect if this is a visitor/delivery person ──
+                                        detected_person_type = _detect_person_type(text)
+                                        session_state["person_type"] = (
+                                            detected_person_type
+                                        )
+
                                         candidates = _candidate_names_from_transcript(
                                             text
                                         )
                                         loop = asyncio.get_event_loop()
-                                        for candidate in candidates:
-                                            employee_name = await loop.run_in_executor(
-                                                _face_executor,
-                                                _resolve_employee_name,
-                                                candidate,
-                                            )
-                                            if employee_name:
-                                                logger.info(
-                                                    f"[{client_id}] Employee identified from candidate '{candidate}' as '{employee_name}'"
-                                                )
-                                                break
 
-                                    # If we found a name (and aren't verified yet), trigger face check
+                                        if detected_person_type == "visitor":
+                                            # For visitors: the speaker IS the visitor.
+                                            # Use the first candidate name extracted — do NOT
+                                            # try to match against the employee DB, since the
+                                            # name they mention (e.g. "Suresh") is the person
+                                            # they are visiting, not themselves.
+                                            if candidates:
+                                                employee_name = candidates[0]
+                                                logger.info(
+                                                    f"[{client_id}] Visitor detected. "
+                                                    f"Speaker name extracted: '{employee_name}' "
+                                                    f"(skipping DB lookup)"
+                                                )
+                                        else:
+                                            # For employees: resolve name against DB as before
+                                            for candidate in candidates:
+                                                employee_name = (
+                                                    await loop.run_in_executor(
+                                                        _face_executor,
+                                                        _resolve_employee_name,
+                                                        candidate,
+                                                    )
+                                                )
+                                                if employee_name:
+                                                    logger.info(
+                                                        f"[{client_id}] Employee identified from candidate '{candidate}' as '{employee_name}'"
+                                                    )
+                                                    break
+
+                                    # If we found a name, trigger face capture/verification
                                     if employee_name:
+                                        person_type = session_state["person_type"]
                                         logger.info(
-                                            f"[{client_id}] employee_identified emitted: '{employee_name}'"
+                                            f"[{client_id}] identity_detected emitted: "
+                                            f"'{employee_name}' (person_type={person_type})"
                                         )
+                                        session_state["is_verified"] = False
                                         session_state["awaiting_face"] = True
+                                        session_state["pending_identity_name"] = (
+                                            employee_name
+                                        session_state["pending_text"] = text
+                                        )
                                         try:
                                             await websocket.send_text(
                                                 json.dumps(
                                                     {
                                                         "type": "employee_identified",
                                                         "name": employee_name,
+                                                        # Tell the frontend what to do:
+                                                        # visitor → capture_reference (session photo)
+                                                        # employee → compare_reference (DB match)
+                                                        "person_type": person_type,
+                                                        "session_action": (
+                                                            "capture_reference"
+                                                            if person_type == "visitor"
+                                                            else "compare_reference"
+                                                        ),
                                                     }
                                                 )
                                             )
@@ -428,11 +640,15 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                             logger.warning(
                                                 f"[{client_id}] Client disconnected before face request could be sent."
                                             )
-                                            break  # Exit the while loop safely
+                                            break
                                         except Exception as e:
                                             logger.error(
                                                 f"[{client_id}] Failed to send face request: {e}"
                                             )
+                                    elif session_state.get("pending_identity_name"):
+                                        await text_queue.put(
+                                            "Please complete face verification before continuing."
+                                        )
                                     else:
                                         # If already verified OR no name found, just chat normally!
                                         await text_queue.put(text)

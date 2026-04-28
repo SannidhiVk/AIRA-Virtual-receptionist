@@ -5,7 +5,10 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { CameraStreamHandle } from '@/components/CameraStream';
-import { useWebSocketContext } from '@/contexts/WebSocketContext';
+import {
+  FaceVerificationRequestOptions,
+  useWebSocketContext
+} from '@/contexts/WebSocketContext';
 
 export interface FaceVerificationResult {
   verified: boolean;
@@ -13,6 +16,9 @@ export interface FaceVerificationResult {
   message?: string;
   audioName: string;
   hasPhoto: boolean;
+  personType?: 'employee' | 'visitor';
+  sessionAction?: 'capture_reference' | 'compare_reference';
+  referenceCaptured?: boolean;
 }
 
 interface FaceVerificationOptions {
@@ -45,11 +51,14 @@ export function useFaceVerification(
       onVerificationResult((data) => {
         setIsVerifying(false);
         setResult({
-          verified: data.verified,
-          distance: data.distance,
-          audioName: data.audio_name,
-          hasPhoto: data.has_photo,
-          message: data.message
+          verified: data.verified ?? false,
+          distance: data.distance ?? -1,
+          audioName: data.audio_name ?? '',
+          hasPhoto: data.has_photo ?? false,
+          message: data.message,
+          personType: data.person_type,
+          sessionAction: data.session_action,
+          referenceCaptured: data.reference_captured
         });
 
         // Auto-clear the result after 8 seconds
@@ -70,7 +79,7 @@ export function useFaceVerification(
   }, [onVerificationResult]);
 
   const verifyFace = useCallback(
-    (audioName: string) => {
+    (audioName: string, requestOptions?: FaceVerificationRequestOptions) => {
       if (!cameraRef.current || !sendFaceVerificationRequest) {
         console.warn(
           'Face verification skipped: camera or websocket not ready.'
@@ -78,7 +87,16 @@ export function useFaceVerification(
         return;
       }
 
-      console.log(`Verifying face for employee: ${audioName}`);
+      const personType = requestOptions?.personType ?? 'employee';
+      const sessionAction =
+        requestOptions?.sessionAction ??
+        (personType === 'visitor' ? 'compare_reference' : undefined);
+
+      console.log(
+        `Verifying face for ${personType}: ${audioName || 'visitor'}${
+          sessionAction ? ` (${sessionAction})` : ''
+        }`
+      );
 
       // 1. Capture the current frame from the camera as base64 JPEG
       const base64Image = cameraRef.current.captureFrame();
@@ -95,7 +113,7 @@ export function useFaceVerification(
       setIsVerifying(true);
 
       // 3. Send the request via WebSocket
-      sendFaceVerificationRequest(audioName, base64Image);
+      sendFaceVerificationRequest(audioName, base64Image, requestOptions);
     },
     [cameraRef, sendFaceVerificationRequest]
   );

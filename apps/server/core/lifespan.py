@@ -9,6 +9,7 @@ from models.tts_processor import KokoroTTSProcessor
 from receptionist.database import engine
 from receptionist.models import Base
 from receptionist.seed_data import seed_database
+from services.face_recognition_service import cleanup_old_captures
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,10 @@ async def lifespan(app: FastAPI):
             seed_database()
 
         await loop.run_in_executor(None, _init_db)
+        deleted_captures = await loop.run_in_executor(None, cleanup_old_captures)
+        logger.info(
+            "Diagnostic capture cleanup completed. Deleted=%s", deleted_captures
+        )
 
         logger.info("All models initialized successfully")
     except Exception as e:

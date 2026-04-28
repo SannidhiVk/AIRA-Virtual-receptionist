@@ -10,7 +10,7 @@ htmlcov/
 apps/server/GROQ_API_KEY.txt
 .env
 
-
+af_sarah.pt
 # Distribution / packaging
 dist/
 build/
