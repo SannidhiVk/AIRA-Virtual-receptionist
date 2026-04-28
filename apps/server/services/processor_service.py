@@ -20,7 +20,7 @@ async def process_text_for_client(client_id: str, text: str) -> str:
             from models.groq_processor import GroqProcessor
 
             # 1. Reset the session so we start completely fresh on a wake word
-            clear_session_state(client_id, retain_name=False)
+            clear_session_state(client_id)
 
             # 2. Inject the hardcoded greeting into the LLM's memory
             # This tells the LLM it ALREADY welcomed the user, preventing repeats!

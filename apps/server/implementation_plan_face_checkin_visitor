@@ -1,0 +1,154 @@
+# Visitor Face Verification + Memory Management
+
+## Background
+
+The current face verification system only supports **employees** — it looks up an employee by name, finds their stored photo, and runs DeepFace to compare. We now need to extend this to **visitors** and add guardrails so photos/captures don't fill up disk or memory over time.
+
+### Key Observations from Research
+
+| What | Current State |
+|---|---|
+| `Visitor` model | Already has `id_photo_path = Column(String)` — ready to use |
+| `get_or_create_visitor()` | Reuses existing visitor profiles — a returning "John Smith" maps to the same row |
+| `CAPTURES_DIR` | Saves **every** live capture with no cleanup — will fill disk over time |
+| DeepFace model | Loaded once at warmup, shared across all calls — no per-request memory issue |
+| Temp files | Cleaned up in `finally` block ✓ |
+
+---
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Visitor Photo Lifecycle**: When a visitor first arrives, we have no stored photo to compare against. Two options:
+> - **Option A (Recommended)**: On first visit, capture and save their face as `id_photo_path`. On subsequent visits, compare the live frame against that stored photo. This gives us cross-visit identity tracking.
+> - **Option B**: Only compare within a single session (e.g., capture at name-giving, compare at check-out). No persistence.
+>
+> The plan below assumes **Option A**.
+
+> [!IMPORTANT]
+> **Capture Retention**: How long should diagnostic captures (the `CAPTURES_DIR` images) be kept?
+> - Default in the plan: **7 days**, configurable via `CAPTURE_RETENTION_DAYS` env var.
+> - Set to `0` to disable capture saving entirely.
+
+---
+
+## Proposed Changes
+
+### 1. Face Recognition Service — Generalize for Both Employees & Visitors
+
+#### [MODIFY] [face_recognition_service.py](file:///c:/Users/Administrator/Desktop/CPU-compatible-AI-/apps/server/services/face_recognition_service.py)
+
+**What changes:**
+- Add `VISITORS_PHOTOS_DIR` path constant (`receptionist/photos/visitors/`)
+- Add `verify_person_face(person_type, name, image_b64)` — unified entry point that routes to employee or visitor logic
+- Add `verify_visitor_face(visitor_name, image_b64)`:
+  - Looks up visitor by name via `get_visitor_by_name()`
+  - If visitor has `id_photo_path` → compare live frame against it (same as employee flow)
+  - If visitor has **no** stored photo → save the live frame as their `id_photo_path` (first-visit enrollment)
+  - Return same result schema as `verify_employee_face()`
+- Add `cleanup_old_captures(max_age_days=7)` — deletes files in `CAPTURES_DIR` older than N days
+- Add `get_visitor_photo_path(visitor_id)` helper
+
+**Why this design:**
+- Reuses **100% of the existing DeepFace pipeline** (same model, same detector, same threshold)
+- No new model loading = no additional memory
+- Visitors and employees share the same result schema so the frontend doesn't need separate logic
+
+---
+
+### 2. Visitor Photo Storage in DB
+
+#### [MODIFY] [database.py](file:///c:/Users/Administrator/Desktop/CPU-compatible-AI-/apps/server/receptionist/database.py)
+
+**What changes:**
+- Add `update_visitor_photo(visitor_id, photo_path)` function — sets `id_photo_path` on the Visitor row
+- No schema migration needed — `id_photo_path` column already exists
+
+---
+
+### 3. WebSocket Handler — Add Visitor Verification Message
+
+#### [MODIFY] [websocket_routes.py](file:///c:/Users/Administrator/Desktop/CPU-compatible-AI-/apps/server/routes/websocket_routes.py)
+
+**What changes:**
+- Extend the existing `verify_face` handler to accept an optional `person_type` field:
+  ```json
+  { "type": "verify_face", "audio_name": "John", "image_b64": "...", "person_type": "visitor" }
+  ```
+- If `person_type == "visitor"` → call `verify_visitor_face()` instead of `verify_employee_face()`
+- Default `person_type` to `"employee"` for backward compatibility
+
+---
+
+### 4. Employee Routes — Add Visitor Photo Upload
+
+#### [MODIFY] [employee_routes.py](file:///c:/Users/Administrator/Desktop/CPU-compatible-AI-/apps/server/routes/employee_routes.py)
+
+**What changes:**
+- Add `POST /visitors/{id}/photo` — manual photo upload for visitors (admin use)
+- Add `GET /visitors/{id}/photo` — serve the stored visitor photo
+
+---
+
+### 5. Capture Cleanup — Automatic Disk Housekeeping
+
+#### [MODIFY] [face_recognition_service.py](file:///c:/Users/Administrator/Desktop/CPU-compatible-AI-/apps/server/services/face_recognition_service.py)
+
+**What changes:**
+- `cleanup_old_captures(max_age_days)` — scans `CAPTURES_DIR`, deletes `.jpg` files older than `max_age_days`
+- Called on server startup (in lifespan) and optionally on a daily schedule
+
+#### [MODIFY] [main.py](file:///c:/Users/Administrator/Desktop/CPU-compatible-AI-/apps/server/main.py) or lifespan
+
+**What changes:**
+- Call `cleanup_old_captures()` during startup after DeepFace warmup
+
+---
+
+### 6. Frontend — Pass `person_type` in Verification Request
+
+#### [MODIFY] [useFaceVerification.ts](file:///c:/Users/Administrator/Desktop/CPU-compatible-AI-/apps/client/src/hooks/useFaceVerification.ts)
+
+**What changes:**
+- `verifyFace(audioName, personType='employee')` — accepts optional `personType` parameter
+- Passes `person_type` in the WebSocket message
+
+#### [MODIFY] [WebSocketContext.tsx](file:///c:/Users/Administrator/Desktop/CPU-compatible-AI-/apps/client/src/contexts/WebSocketContext.tsx)
+
+**What changes:**
+- `sendFaceVerificationRequest(audioName, imageB64, personType)` — adds `person_type` field to the message
+
+---
+
+## Memory & Disk Management Summary
+
+| Concern | Solution | Impact |
+|---|---|---|
+| **DeepFace model (~500MB RAM)** | Already loaded once at startup, shared for all verifications. No change needed. | 0 extra memory |
+| **Temp files (live frames)** | Already cleaned up in `finally` block. No change needed. | ✓ |
+| **Captures (diagnostic JPEGs)** | New `cleanup_old_captures()` deletes files older than 7 days. Runs at startup. | Prevents disk fill |
+| **Visitor photos (permanent)** | One photo per visitor, overwritten on each visit. Stored at `visitors/{id}.jpg`. | ~50KB per visitor |
+| **Employee photos** | Static — uploaded once by admin. No cleanup needed. | Unchanged |
+
+---
+
+## Open Questions
+
+1. **Option A vs B** for visitor photo lifecycle (see above) — do you prefer first-visit enrollment (A) or session-only comparison (B)?
+2. **Capture retention** — is 7 days reasonable, or would you prefer a different default?
+3. **Visitor photo overwrite** — should we overwrite the visitor's stored photo on every visit (more current) or keep the original enrollment photo?
+
+---
+
+## Verification Plan
+
+### Automated Tests
+- Upload a visitor photo via `POST /visitors/{id}/photo` → confirm file saved to disk and DB updated
+- Send a `verify_face` message with `person_type: "visitor"` → confirm correct result schema returned
+- Run `cleanup_old_captures()` with test files → confirm old files deleted, recent files kept
+
+### Manual Verification
+- Start server → verify warmup completes without errors
+- Check-in as a new visitor → confirm face is captured and stored as `id_photo_path`
+- Check-in as the same visitor again → confirm face comparison runs and returns verified/mismatch
+- Inspect `CAPTURES_DIR` → confirm old captures are cleaned up after retention period

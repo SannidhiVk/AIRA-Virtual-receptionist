@@ -2,6 +2,7 @@ import asyncio
 import logging
 import numpy as np
 import torch
+import os
 
 try:
     from kokoro import KPipeline
@@ -39,12 +40,24 @@ class KokoroTTSProcessor:
             # Initialize Kokoro TTS pipeline on the chosen device
             self.pipeline = KPipeline(lang_code="a", device=device)
 
-            # Set voice
-            self.default_voice = "af_sarah"
+            # Set voice to the local file we downloaded
+            # This safely gets the path to apps/server/voices/af_sarah.pt
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            local_voice_path = os.path.join(base_dir, "voices", "af_sarah.pt")
+
+            if os.path.exists(local_voice_path):
+                self.default_voice = local_voice_path
+                logger.info(f"Loaded local voice file from: {local_voice_path}")
+            else:
+                self.default_voice = "af_sarah"
+                logger.warning(
+                    f"Local voice not found at {local_voice_path}. Falling back to internet download."
+                )
 
             logger.info("Kokoro TTS processor initialized successfully")
             # Counter
             self.synthesis_count = 0
+
         except Exception as e:
             logger.error(f"Error initializing Kokoro TTS: {e}")
             self.pipeline = None
