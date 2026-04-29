@@ -80,6 +80,8 @@ interface WebSocketContextType {
   ) => void;
   onVerificationResult?: (callback: (data: WebSocketMessage) => void) => void;
   onEmployeeIdentified?: (callback: (employeeName: string) => void) => void;
+  onRequestFaceFrame?: (callback: (data: WebSocketMessage) => void) => void;
+  onStateChange?: (callback: (state: string) => void) => void;
 }
 
 const WebSocketContext = createContext<WebSocketContextType | null>(null);
@@ -141,6 +143,10 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
   const employeeIdentifiedCallbackRef = useRef<
     ((employeeName: string) => void) | null
   >(null);
+  const requestFaceFrameCallbackRef = useRef<
+    ((data: WebSocketMessage) => void) | null
+  >(null);
+  const stateChangeCallbackRef = useRef<((state: string) => void) | null>(null);
 
   const connect = useCallback(async () => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -181,6 +187,11 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
             faceVerificationResultCallbackRef.current?.(data);
           }
 
+          if (data.type === 'request_face_frame') {
+            console.log('📸 Backend requested a face frame:', data);
+            requestFaceFrameCallbackRef.current?.(data);
+          }
+
           if (
             data.type === 'employee_identified' &&
             typeof data.name === 'string'
@@ -192,6 +203,7 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
             serverStateCallbackRef.current?.(
               data.state as 'passive' | 'listening' | 'processing' | 'speaking'
             );
+            stateChangeCallbackRef.current?.(data.state);
           }
 
           if (data.interrupt) {
@@ -351,6 +363,17 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
     []
   );
 
+  const onRequestFaceFrame = useCallback(
+    (callback: (data: WebSocketMessage) => void) => {
+      requestFaceFrameCallbackRef.current = callback;
+    },
+    []
+  );
+
+  const onStateChange = useCallback((callback: (state: string) => void) => {
+    stateChangeCallbackRef.current = callback;
+  }, []);
+
   // Callback registration methods
   const onVerificationResult = useCallback(
     (callback: (data: WebSocketMessage) => void) => {
@@ -424,7 +447,9 @@ export const WebSocketProvider: React.FC<WebSocketProviderProps> = ({
     onServerState,
     sendFaceVerificationRequest,
     onVerificationResult,
-    onEmployeeIdentified
+    onEmployeeIdentified,
+    onRequestFaceFrame,
+    onStateChange
   };
 
   return (

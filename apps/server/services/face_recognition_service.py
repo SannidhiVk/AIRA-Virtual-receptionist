@@ -89,8 +89,7 @@ def _save_capture(
 ) -> Optional[Path]:
     """
     Save a diagnostic capture to CAPTURES_DIR for mismatches or errors only.
-    Filename format: <timestamp>_<subject>_<reason>_<result>_d<distance>.jpg
-    Returns the saved path, or None on failure.
+    Routes to 'employees' or 'visitor_sessions' subfolders based on the reason.
     """
     if CAPTURE_RETENTION_DAYS <= 0:
         logger.info(
@@ -111,7 +110,21 @@ def _save_capture(
         result_tag = "MATCH" if verified else "MISMATCH"
         dist_tag = f"d{distance:.3f}".replace(".", "p")
         filename = f"{ts}_{safe_name}_{safe_reason}_{result_tag}_{dist_tag}.jpg"
-        save_path = CAPTURES_DIR / filename
+
+        # --- NEW ROUTING LOGIC ---
+        if "employee" in reason.lower():
+            target_dir = CAPTURES_DIR / "employees"
+        elif "visitor" in reason.lower():
+            target_dir = CAPTURES_DIR / "visitor_sessions"
+        else:
+            target_dir = CAPTURES_DIR
+
+        # Ensure the subfolder exists before saving
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        save_path = target_dir / filename
+        # -------------------------
+
         save_path.write_bytes(image_bytes)
         logger.info("Capture saved to: %s", save_path)
         return save_path
@@ -398,21 +411,23 @@ def verify_visitor_face(
             )
         return {**result, "employee_id": None}
     except Exception as e:
-        logger.error(
-            "DeepFace verification failed for visitor '%s': %s",
-            visitor_name,
-            e,
-            exc_info=True,
-        )
-        _save_capture(
-            image_b64, visitor_name or "visitor", False, -1.0, "visitor_error"
-        )
+        logger.error("DeepFace verification failed for '%s': %s", visitor_name, e)
+        _save_capture(image_b64, visitor_name or "visitor", False, -1.0, "error")
+
+        # --- ADD THIS CHECK ---
+        error_msg = str(e)
+        if "Face could not be detected" in error_msg or "FaceNotDetected" in error_msg:
+            message = "I cannot see your face clearly. Please step into the camera frame so I can verify you."
+        else:
+            message = "I'm sorry, I encountered an error while trying to verify your face. Please try again."
+        # ----------------------
+
         return {
             "verified": False,
             "distance": -1.0,
-            "message": "I'm sorry, I encountered an error while trying to verify the visitor face. Please try again.",
+            "message": message,  # <-- Use the dynamic message
             "has_photo": True,
-            "employee_id": None,
+            "employee_id": None,  # Use None if in verify_visitor_face
         }
     finally:
         for tmp_path in (reference_tmp_path, live_tmp_path):

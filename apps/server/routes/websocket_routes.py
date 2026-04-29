@@ -49,7 +49,7 @@ OWW_CHUNK_BYTES = OWW_CHUNK_SAMPLES * 2
 SILERO_WINDOW_SAMPLES = 8000
 MAX_SILENCE_MS = 1200
 FOLLOWUP_TIMEOUT_SECONDS = float(os.getenv("FOLLOWUP_TIMEOUT", "12.0"))
-
+MAX_MISMATCH_STRIKES = 3
 
 _NAME_STOPWORDS = frozenset(
     {
@@ -263,6 +263,8 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         "visitor_reference_image_b64": None,
         "pending_identity_name": None,
         "person_type": "employee",  # "employee" or "visitor"
+        "mismatch_strikes": 0,
+        "face_verify_in_progress": False,
     }
 
     try:
@@ -313,6 +315,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     session_state["visitor_reference_image_b64"] = None
                     session_state["pending_identity_name"] = None
                     session_state["person_type"] = "employee"
+                    session_state["mismatch_strikes"] = 0
 
                     try:
                         ww_service.model.reset()
@@ -340,6 +343,16 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         # Triggered when the employee says their name and LLM identifies them.
                         # Frontend sends: { type: "verify_face", audio_name: "John", image_b64: "..." }
                         if msg.get("type") == "verify_face":
+                            if session_state["mode"] == "PASSIVE":
+                                logger.info(
+                                    f"[{client_id}] Ignoring stray face frame because session timed out (PASSIVE)."
+                                )
+                                continue
+                            if session_state.get("face_verify_in_progress"):
+                                continue
+
+                            session_state["face_verify_in_progress"] = True
+
                             audio_name = msg.get("audio_name", "")
                             image_b64 = msg.get("image_b64", "")
                             # Always trust server-side session_state over frontend-sent person_type
@@ -361,6 +374,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                 and session_action == "capture_reference"
                             ):
                                 session_state["visitor_reference_image_b64"] = image_b64
+                                session_state["is_verified"] = True
+                                session_state["pending_identity_name"] = None
+
                                 try:
                                     await websocket.send_text(
                                         json.dumps(
@@ -389,7 +405,11 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                 else:
                                     # Fallback: reset mode so the server isn't permanently deaf
                                     session_state["mode"] = "PASSIVE"
-                                    await websocket.send_text(json.dumps({"state": "passive"}))
+                                    await websocket.send_text(
+                                        json.dumps({"state": "passive"})
+                                    )
+
+                                session_state["face_verify_in_progress"] = False
                                 continue
 
                             reference_image_b64 = ""
@@ -398,7 +418,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                     session_state.get("visitor_reference_image_b64")
                                     or ""
                                 )
-
+                            was_already_verified = session_state.get(
+                                "is_verified", False
+                            )
                             # Run DeepFace in a thread pool (it's blocking/CPU-intensive)
                             loop = asyncio.get_event_loop()
                             result = await loop.run_in_executor(
@@ -410,6 +432,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                     reference_image_b64=reference_image_b64,
                                 ),
                             )
+                            session_state["face_verify_in_progress"] = False
                             if result.get("verified"):
                                 session_state["is_verified"] = True
                                 session_state["pending_identity_name"] = None
@@ -423,12 +446,55 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                             )
 
                             # Send result back to frontend (for the UI badge)
+                            # --- CALCULATE STRIKES & FRONTEND STATE BEFORE SENDING ---
+                            frontend_verified = result["verified"]
+                            speak_message = False
+
+                            if result["has_photo"] and result["message"]:
+                                if result["verified"]:
+                                    # Reset strikes on a successful match
+                                    session_state["mismatch_strikes"] = 0
+                                    followup_entered_at = time.time()
+                                    if not was_already_verified:
+                                        logger.info(
+                                            f"[{client_id}] Initial face match — queueing confirmation."
+                                        )
+                                        speak_message = True
+                                else:
+                                    if not was_already_verified:
+                                        # SCENARIO 1: INITIAL VERIFICATION
+                                        logger.info(
+                                            f"[{client_id}] Initial face mismatch — immediate challenge."
+                                        )
+                                        speak_message = True
+                                    else:
+                                        # SCENARIO 2: CONTINUOUS VERIFICATION (The "Pen Drop")
+                                        session_state["mismatch_strikes"] += 1
+                                        strikes = session_state["mismatch_strikes"]
+
+                                        if strikes >= MAX_MISMATCH_STRIKES:
+                                            logger.info(
+                                                f"[{client_id}] Continuous mismatch (Strike {strikes}) — Revoking verification."
+                                            )
+                                            speak_message = True
+                                            session_state["mismatch_strikes"] = 0
+                                            session_state["is_verified"] = False
+                                            frontend_verified = False  # Tell frontend to finally show red badge
+                                        else:
+                                            logger.info(
+                                                f"[{client_id}] Continuous mismatch (Strike {strikes}) — Debouncing. Hiding from frontend."
+                                            )
+                                            # MASK the failure from the frontend so the camera loop doesn't break!
+                                            frontend_verified = True
+                                            followup_entered_at = time.time()
+
+                            # --- NOW SEND TO FRONTEND ---
                             try:
                                 await websocket.send_text(
                                     json.dumps(
                                         {
                                             "type": "face_verification_result",
-                                            "verified": result["verified"],
+                                            "verified": frontend_verified,  # <-- Uses the masked value
                                             "distance": result["distance"],
                                             "audio_name": audio_name,
                                             "has_photo": result["has_photo"],
@@ -440,26 +506,25 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                 )
                             except Exception as e:
                                 logger.warning(
-                                    f"[{client_id}] Could not send face result. Client likely disconnected. Error: {e}"
+                                    f"[{client_id}] Could not send face result. Error: {e}"
                                 )
                                 break
 
-                            # Speak verification result when a comparison was made.
-                            # - mismatch => verbal challenge
-                            # - match => verbal confirmation ("you can proceed")
-                            if result["has_photo"] and result["message"]:
-                                if result["verified"]:
-                                    logger.info(
-                                        f"[{client_id}] Face match — queueing verification confirmation for '{audio_name}'"
-                                    )
-                                else:
-                                    logger.info(
-                                        f"[{client_id}] Face mismatch — queueing verbal challenge for '{audio_name}'"
-                                    )
+                            # --- HANDLE AI SPEECH & UI STATE ---
+                            if speak_message:
                                 await text_queue.put(result["message"])
+                                session_state["mode"] = "FOLLOWUP"
+                                await websocket.send_text(
+                                    json.dumps({"state": "listening"})
+                                )
+                            elif was_already_verified:
+                                # If it was a silent debounce, OR a successful continuous match, keep listening
+                                session_state["mode"] = "FOLLOWUP"
+                                await websocket.send_text(
+                                    json.dumps({"state": "listening"})
+                                )
 
-                            continue
-
+                                # --------------------------
                         # ── Stop-speaking control message ────────────────────────
                         if msg.get("action") == "stop_speaking":
                             session_state["mode"] = "PASSIVE"
@@ -616,8 +681,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                         session_state["awaiting_face"] = True
                                         session_state["pending_identity_name"] = (
                                             employee_name
-                                        session_state["pending_text"] = text
                                         )
+                                        session_state["pending_text"] = text
+
                                         try:
                                             await websocket.send_text(
                                                 json.dumps(
@@ -661,43 +727,52 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
                 logger.info(f"[{client_id}] AI Response generated: '{reply_text}'")
 
-                if not reply_text or not reply_text.strip():
-                    session_state["mode"] = "PASSIVE"
-                    await websocket.send_text(json.dumps({"state": "passive"}))
-                    text_queue.task_done()
-                    continue
+                # --- THE TRY BLOCK STARTS HERE ---
+                try:
+                    if not reply_text or not reply_text.strip():
+                        session_state["mode"] = "PASSIVE"
+                        await websocket.send_text(json.dumps({"state": "passive"}))
+                        continue
 
-                audio, word_timings = (
-                    await tts_processor.synthesize_remaining_speech_with_timing(
-                        reply_text
-                    )
-                )
-                if audio is not None and len(audio) > 0:
-                    session_state["mode"] = "SPEAKING"
-                    manager.client_state[client_id] = "SPEAKING"
-                    audio_bytes = (audio * 32767).astype(np.int16).tobytes()
-                    wav_bytes = create_wav_from_pcm(audio_bytes, sample_rate=24000)
-                    b64 = base64.b64encode(wav_bytes).decode("utf-8")
-                    await websocket.send_text(
-                        json.dumps(
-                            {
-                                "audio": b64,
-                                "word_timings": word_timings,
-                                "sample_rate": 24000,
-                                "method": "native_kokoro_timing",
-                                "state": "speaking",
-                            }
+                    audio, word_timings = (
+                        await tts_processor.synthesize_remaining_speech_with_timing(
+                            reply_text
                         )
                     )
+                    if audio is not None and len(audio) > 0:
+                        session_state["mode"] = "SPEAKING"
+                        manager.client_state[client_id] = "SPEAKING"
+                        audio_bytes = (audio * 32767).astype(np.int16).tobytes()
+                        wav_bytes = create_wav_from_pcm(audio_bytes, sample_rate=24000)
+                        b64 = base64.b64encode(wav_bytes).decode("utf-8")
+                        await websocket.send_text(
+                            json.dumps(
+                                {
+                                    "audio": b64,
+                                    "word_timings": word_timings,
+                                    "sample_rate": 24000,
+                                    "method": "native_kokoro_timing",
+                                    "state": "speaking",
+                                }
+                            )
+                        )
 
-                    # Wait for audio to physically finish playing on the frontend
-                    await asyncio.sleep((len(audio) / 24000.0) + 0.5)
+                        # Wait for audio to physically finish playing on the frontend
+                        await asyncio.sleep((len(audio) / 24000.0) + 0.5)
 
-                # ALWAYS give the user 12 seconds to reply after Jarvis speaks
-                session_state["mode"] = "FOLLOWUP"
-                await websocket.send_text(json.dumps({"state": "listening"}))
+                    # ALWAYS give the user 12 seconds to reply after Jarvis speaks
+                    session_state["mode"] = "FOLLOWUP"
+                    await websocket.send_text(json.dumps({"state": "listening"}))
 
-                text_queue.task_done()
+                except RuntimeError:
+                    # This catches the error if the user closes the tab
+                    logger.info(
+                        f"[{client_id}] Client disconnected before AI could finish responding."
+                    )
+                    break
+                finally:
+                    # This ensures the queue is ALWAYS marked as done, even if it errors or continues
+                    text_queue.task_done()
 
         tasks = [
             asyncio.create_task(listener()),

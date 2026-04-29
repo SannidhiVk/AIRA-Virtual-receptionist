@@ -67,6 +67,8 @@ DELIVERY_KEYWORDS = {
     "parcel",
     "food",
     "courier",
+    "dunzo",
+    "blinkit",
 }
 
 
