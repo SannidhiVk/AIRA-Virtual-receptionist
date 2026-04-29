@@ -23,33 +23,21 @@ COMPANY_NAME = "Sharp Software Development India Private Limited."
 # ─────────────────────────────────────────────────────────────────────────────
 
 BASE_SYSTEM_PROMPT = f"""You are {AI_NAME}, the expert AI receptionist at {COMPANY_NAME}.
-STRICT TONE: Concise, professional, 1-2 sentences only. 
+STRICT TONE: Concise, professional, human-like. 1-2 sentences.
 
 RULES:
-1. GREETING: Check current time. 05:00-11:59: "Good Morning". 12:00-16:59: "Good Afternoon". 17:00-04:59: "Good Evening".
-2. NO REPETITION: If you have already confirmed a name or host, NEVER ask for it again.
-3. SCHEDULING: If the user says "Only me", "Just us", or "No one else", set attendees to 'Finalized' and proceed to Date/Time immediately.
-4. TRUST THE USER: If they say "I am an employee," categorize them as 'Employee' immediately.
-5. SLACK: Only notify the HOST (the person they are meeting). Never notify the visitor's colleague.
+1. GREETINGS: Only greet the user if they just arrived or said hello. Do NOT repeat greetings like "Good Morning" in every sentence.
+2. NO REPETITION: If you already know a name or host, proceed to the next step.
+3. PERSONALIZATION: Use the visitor's name once you know it.
+4. TRUST THE USER: If they say "I am an employee," categorize them as 'Employee'.
 """
 
 # Detailed NLU Extraction Prompt
-EXTRACT_SYSTEM = """You are an information extraction engine for a corporate receptionist system.
-Given a visitor's spoken input, extract structured data and return ONLY a valid JSON object.
-No markdown. No explanation. No preamble. Just the JSON.
-
-Output format:
+EXTRACT_SYSTEM = """You are an information extraction engine. Return ONLY valid JSON.
 {
-  "intent": <string>,
+  "intent": "check_in" | "schedule_meeting" | "employee_lookup" | "confirm" | "general",
   "entities": {
-    "visitor_name": <string|null>,
-    "employee_name": <string|null>,
-    "role": <string|null>,
-    "date": <string|null>,
-    "time": <string|null>,
-    "purpose": <string|null>,
-    "visitor_type": <string|null>,
-    "email": <string|null>
+    "visitor_name": string, "employee_name": string, "date": string, "time": string, "purpose": string, "visitor_type": string, "email": string
   }
 }
 
@@ -132,22 +120,7 @@ def _build_system_message(company_info: Optional[dict] = None) -> str:
     now = datetime.now()
     current_time_str = now.strftime("%A, %B %d, %Y at %I:%M %p")
 
-    # CALCULATE GREETING ONCE HERE
-    hour = now().hour
-    if 5 <= hour < 12:
-        greeting = "Good Morning"
-    elif 12 <= hour < 17:
-        greeting = "Good Afternoon"
-    else:
-        greeting = "Good Evening"
-
-    system = (
-        BASE_SYSTEM_PROMPT
-        + f"\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        + f"CURRENT GREETING: {greeting}\n"  # FORCE THE GREETING
-        + f"CURRENT DATE & TIME: {current_time_str}\n"
-        + f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    )
+    system = BASE_SYSTEM_PROMPT + f"\n\nCURRENT DATE & TIME: {current_time_str}\n"
     if company_info:
         system += "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCOMPANY CONTEXT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         if company_info.get("company_name"):
