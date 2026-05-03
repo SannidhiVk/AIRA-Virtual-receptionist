@@ -253,6 +253,7 @@ def _run_face_comparison(
         "distance": round(distance, 4),
         "message": message,
         "has_photo": True,
+        "face_detected": True,
         "capture_dir": str(CAPTURES_DIR),
     }
 
@@ -334,15 +335,31 @@ def verify_employee_face(audio_name: str, image_b64: str) -> dict:
         return {**result, "employee_id": employee.id}
 
     except Exception as e:
-        logger.error(
-            "DeepFace verification failed for '%s': %s", audio_name, e, exc_info=True
+        error_msg = str(e)
+        is_no_face = (
+            "Face could not be detected" in error_msg or "FaceNotDetected" in error_msg
         )
-        _save_capture(image_b64, audio_name, False, -1.0, "employee_error")
+        if is_no_face:
+            logger.debug(
+                "No face detected in frame for employee '%s' — silent, not a strike.",
+                audio_name,
+            )
+            message = "I cannot see your face clearly. Please step into the camera frame so I can verify you."
+        else:
+            logger.error(
+                "DeepFace verification failed for '%s': %s",
+                audio_name,
+                e,
+                exc_info=True,
+            )
+            _save_capture(image_b64, audio_name, False, -1.0, "employee_error")
+            message = "I'm sorry, I encountered an error while trying to verify your face. Please try again."
 
         return {
             "verified": False,
             "distance": -1.0,
-            "message": "I'm sorry, I encountered an error while trying to verify your face. Please try again.",
+            "face_detected": False,
+            "message": message,
             "has_photo": True,
             "employee_id": employee.id,
         }
@@ -411,23 +428,30 @@ def verify_visitor_face(
             )
         return {**result, "employee_id": None}
     except Exception as e:
-        logger.error("DeepFace verification failed for '%s': %s", visitor_name, e)
-        _save_capture(image_b64, visitor_name or "visitor", False, -1.0, "error")
-
-        # --- ADD THIS CHECK ---
         error_msg = str(e)
-        if "Face could not be detected" in error_msg or "FaceNotDetected" in error_msg:
+        is_no_face = (
+            "Face could not be detected" in error_msg or "FaceNotDetected" in error_msg
+        )
+        if is_no_face:
+            logger.debug(
+                "No face detected in frame for visitor '%s' — silent, not a strike.",
+                visitor_name,
+            )
             message = "I cannot see your face clearly. Please step into the camera frame so I can verify you."
         else:
+            logger.error("DeepFace verification failed for '%s': %s", visitor_name, e)
+            _save_capture(
+                image_b64, visitor_name or "visitor", False, -1.0, "visitor_error"
+            )
             message = "I'm sorry, I encountered an error while trying to verify your face. Please try again."
-        # ----------------------
 
         return {
             "verified": False,
             "distance": -1.0,
-            "message": message,  # <-- Use the dynamic message
+            "face_detected": False,
+            "message": message,
             "has_photo": True,
-            "employee_id": None,  # Use None if in verify_visitor_face
+            "employee_id": None,
         }
     finally:
         for tmp_path in (reference_tmp_path, live_tmp_path):

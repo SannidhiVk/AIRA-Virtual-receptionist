@@ -452,7 +452,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
                             if result["has_photo"] and result["message"]:
                                 if result["verified"]:
-                                    # Reset strikes on a successful match
+                                    # ── Successful match ──────────────────────
                                     session_state["mismatch_strikes"] = 0
                                     followup_entered_at = time.time()
                                     if not was_already_verified:
@@ -460,33 +460,36 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                             f"[{client_id}] Initial face match — queueing confirmation."
                                         )
                                         speak_message = True
+
+                                elif not result.get("face_detected", True):
+                                    # ── No face in frame (person ducked out) ──
+                                    # Silent debounce — never counts as a strike.
+                                    logger.info(
+                                        f"[{client_id}] No face detected — silent debounce (no strike)."
+                                    )
+                                    frontend_verified = was_already_verified
+                                    followup_entered_at = time.time()
+
                                 else:
-                                    if not was_already_verified:
-                                        # SCENARIO 1: INITIAL VERIFICATION
+                                    # ── Real mismatch (wrong face / high distance) ──
+                                    # Unified strike logic — same path for initial and continuous.
+                                    session_state["mismatch_strikes"] += 1
+                                    strikes = session_state["mismatch_strikes"]
+
+                                    if strikes >= MAX_MISMATCH_STRIKES:
                                         logger.info(
-                                            f"[{client_id}] Initial face mismatch — immediate challenge."
+                                            f"[{client_id}] Mismatch Strike {strikes} — Revoking verification."
                                         )
                                         speak_message = True
+                                        session_state["mismatch_strikes"] = 0
+                                        session_state["is_verified"] = False
+                                        frontend_verified = False
                                     else:
-                                        # SCENARIO 2: CONTINUOUS VERIFICATION (The "Pen Drop")
-                                        session_state["mismatch_strikes"] += 1
-                                        strikes = session_state["mismatch_strikes"]
-
-                                        if strikes >= MAX_MISMATCH_STRIKES:
-                                            logger.info(
-                                                f"[{client_id}] Continuous mismatch (Strike {strikes}) — Revoking verification."
-                                            )
-                                            speak_message = True
-                                            session_state["mismatch_strikes"] = 0
-                                            session_state["is_verified"] = False
-                                            frontend_verified = False  # Tell frontend to finally show red badge
-                                        else:
-                                            logger.info(
-                                                f"[{client_id}] Continuous mismatch (Strike {strikes}) — Debouncing. Hiding from frontend."
-                                            )
-                                            # MASK the failure from the frontend so the camera loop doesn't break!
-                                            frontend_verified = True
-                                            followup_entered_at = time.time()
+                                        logger.info(
+                                            f"[{client_id}] Mismatch Strike {strikes} — Debouncing. Hiding from frontend."
+                                        )
+                                        frontend_verified = was_already_verified
+                                        followup_entered_at = time.time()
 
                             # --- NOW SEND TO FRONTEND ---
                             try:
