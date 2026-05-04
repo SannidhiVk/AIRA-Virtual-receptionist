@@ -153,7 +153,7 @@ def _extract_spoken_name(text: str) -> str | None:
         return None
 
     # Capture exactly 1 or 2 words immediately following the intro phrase.
-    name_pattern = r"([a-zA-Z.'-]+(?:\s+[a-zA-Z.'-]+)?)"
+    name_pattern = r"([A-Za-z'-]+(?:\s+[A-Za-z'-]+)?)"
 
     patterns = [
         rf"\b(?:i am|i'm)\s+{name_pattern}",
@@ -167,11 +167,16 @@ def _extract_spoken_name(text: str) -> str | None:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
             name = match.group(1).strip(" .,!?:;")
-            # Strip trailing "here" if captured (e.g. "I'm Husha here" → "Husha here" → "Husha")
+            # Strip trailing "here" if captured
             name = re.sub(r"\s+here$", "", name, flags=re.IGNORECASE).strip()
-            # Reject if the captured word is itself a stopword
+
+            # --- UPDATED LOGIC ---
+            # Reject if the whole phrase is a stopword, OR if the first word is a stopword
             if name.lower() not in _NAME_STOPWORDS and len(name) >= 2:
-                return name
+                first_word = name.split()[0].lower()
+                if first_word not in _NAME_STOPWORDS:
+                    return name
+            # ---------------------
 
     # Fallback for short direct intros like "John" or "John Doe".
     cleaned = re.sub(r"[^a-zA-Z\s.'-]", " ", text).strip()
@@ -352,18 +357,18 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         # Frontend sends: { type: "verify_face", audio_name: "John", image_b64: "..." }
                         if msg.get("type") == "verify_face":
                             if session_state["mode"] == "PASSIVE":
-                                logger.info(
-                                    f"[{client_id}] Ignoring stray face frame because session timed out (PASSIVE)."
-                                )
+                                logger.info(...)
+                                continue
+                            if session_state["mode"] in (
+                                "PROCESSING",
+                                "SPEAKING",
+                            ):  # ← ADD THIS
+                                session_state["face_verify_in_progress"] = False
                                 continue
                             if session_state.get("face_verify_in_progress"):
                                 continue
                             if session_state.get("conversation_complete"):
-                                logger.debug(
-                                    f"[{client_id}] Ignoring face frame — conversation already complete, waiting for timeout."
-                                )
                                 continue
-
                             session_state["face_verify_in_progress"] = True
 
                             audio_name = msg.get("audio_name", "")
@@ -481,32 +486,44 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
                                 else:
                                     # ── Real mismatch OR No face in frame (person ducked out) ──
-                                    # Unified strike logic — same path for initial and continuous.
-                                    session_state["mismatch_strikes"] += 1
-                                    strikes = session_state["mismatch_strikes"]
-
                                     reason = (
                                         "No face detected"
                                         if not result.get("face_detected", True)
                                         else "Mismatch"
                                     )
 
-                                    if strikes >= MAX_MISMATCH_STRIKES:
+                                    if not was_already_verified:
+                                        # INITIAL VERIFICATION: Reject immediately and speak!
                                         logger.info(
-                                            f"[{client_id}] {reason} Strike {strikes} — Revoking verification."
+                                            f"[{client_id}] Initial {reason} — rejecting immediately."
                                         )
                                         speak_message = True
                                         session_state["mismatch_strikes"] = 0
                                         session_state["is_verified"] = False
                                         frontend_verified = False
                                     else:
-                                        logger.info(
-                                            f"[{client_id}] {reason} Strike {strikes} — Debouncing. Hiding from frontend."
-                                        )
-                                        frontend_verified = was_already_verified
-                                        if not speech_seen:
-                                            followup_entered_at = time.time()
-                                            audio_buffer.clear()
+                                        # CONTINUOUS VERIFICATION: Use strike/debounce logic
+                                        session_state["mismatch_strikes"] += 1
+                                        strikes = session_state["mismatch_strikes"]
+
+                                        if strikes >= MAX_MISMATCH_STRIKES:
+                                            logger.info(
+                                                f"[{client_id}] {reason} Strike {strikes} — Revoking verification."
+                                            )
+                                            speak_message = True
+                                            session_state["mismatch_strikes"] = 0
+                                            session_state["is_verified"] = False
+                                            frontend_verified = False
+                                        else:
+                                            logger.info(
+                                                f"[{client_id}] {reason} Strike {strikes} — Debouncing. Hiding from frontend."
+                                            )
+                                            frontend_verified = (
+                                                True  # Keep UI green during debounce
+                                            )
+                                            if not speech_seen:
+                                                followup_entered_at = time.time()
+                                                audio_buffer.clear()
                             # --- NOW SEND TO FRONTEND ---
                             try:
                                 await websocket.send_text(
@@ -667,48 +684,65 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                     continue
 
                                 if text and text not in ("NOISE_DETECTED", "NO_SPEECH"):
+                                    text_lower = text.lower()
+                                    if any(
+                                        w in text_lower
+                                        for w in [
+                                            "thank you",
+                                            "thanks",
+                                            "bye",
+                                            "goodbye",
+                                            "that's all",
+                                        ]
+                                    ):
+                                        session_state["conversation_complete"] = True
+                                        await text_queue.put(text)
+                                        continue
+
                                     employee_name = None
 
                                     if not session_state.get("is_verified"):
-                                        # ── Detect if this is a visitor/delivery person ──
-                                        detected_person_type = _detect_person_type(text)
-                                        session_state["person_type"] = (
-                                            detected_person_type
-                                        )
-
-                                        candidates = _candidate_names_from_transcript(
-                                            text
-                                        )
-                                        loop = asyncio.get_event_loop()
-
-                                        if detected_person_type == "visitor":
-                                            # For visitors: the speaker IS the visitor.
-                                            # Use the first candidate name extracted — do NOT
-                                            # try to match against the employee DB, since the
-                                            # name they mention (e.g. "Suresh") is the person
-                                            # they are visiting, not themselves.
-                                            if candidates:
-                                                employee_name = candidates[0]
-                                                logger.info(
-                                                    f"[{client_id}] Visitor detected. "
-                                                    f"Speaker name extracted: '{employee_name}' "
-                                                    f"(skipping DB lookup)"
-                                                )
+                                        known_name = session_state.get("verified_name")
+                                        if known_name:
+                                            employee_name = known_name
+                                            logger.info(
+                                                f"[{client_id}] Face tracking was lost. Re-verifying known user: '{employee_name}'"
+                                            )
                                         else:
-                                            # For employees: resolve name against DB as before
-                                            for candidate in candidates:
-                                                employee_name = (
-                                                    await loop.run_in_executor(
-                                                        _face_executor,
-                                                        _resolve_employee_name,
-                                                        candidate,
-                                                    )
-                                                )
-                                                if employee_name:
+                                            detected_person_type = _detect_person_type(
+                                                text
+                                            )
+                                            session_state["person_type"] = (
+                                                detected_person_type
+                                            )
+
+                                            candidates = (
+                                                _candidate_names_from_transcript(text)
+                                            )
+                                            loop = asyncio.get_event_loop()
+
+                                            if detected_person_type == "visitor":
+                                                if candidates:
+                                                    employee_name = candidates[0]
                                                     logger.info(
-                                                        f"[{client_id}] Employee identified from candidate '{candidate}' as '{employee_name}'"
+                                                        f"[{client_id}] Visitor detected. "
+                                                        f"Speaker name extracted: '{employee_name}' "
+                                                        f"(skipping DB lookup)"
                                                     )
-                                                    break
+                                            else:
+                                                for candidate in candidates:
+                                                    employee_name = (
+                                                        await loop.run_in_executor(
+                                                            _face_executor,
+                                                            _resolve_employee_name,
+                                                            candidate,
+                                                        )
+                                                    )
+                                                    if employee_name:
+                                                        logger.info(
+                                                            f"[{client_id}] Employee identified from candidate '{candidate}' as '{employee_name}'"
+                                                        )
+                                                        break
 
                                     # If we found a name, trigger face capture/verification
                                     if employee_name:

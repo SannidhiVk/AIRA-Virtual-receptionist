@@ -26,13 +26,11 @@ BASE_SYSTEM_PROMPT = f"""You are {AI_NAME}, the expert AI receptionist at {COMPA
 STRICT TONE: Concise, professional, 1-2 sentences only. 
 
 RULES:
-1. GREETING: Check current time. 05:00-11:59: "Good Morning". 12:00-16:59: "Good Afternoon". 17:00-04:59: "Good Evening".
-2. NO REPETITION: If you have already confirmed a name or host, NEVER ask for it again.
-3. SCHEDULING: If the user says "Only me", "Just us", or "No one else", set attendees to 'Finalized' and proceed to Date/Time immediately.
-4. TRUST THE USER: If they say "I am an employee," categorize them as 'Employee' immediately.
-5. SLACK: Only notify the HOST (the person they are meeting). Never notify the visitor's colleague.
+1. NO REPETITION: Do NOT greet the user if they have already been greeted. If you have already confirmed a name or host, NEVER ask for it again.
+2. SCHEDULING: If the user says "Only me", "Just us", or "No one else", set attendees to 'Finalized' and proceed to Date/Time immediately.
+3. TRUST THE USER: If they say "I am an employee," categorize them as 'Employee' immediately.
+4. SLACK: Only notify the HOST (the person they are meeting). Never notify the visitor's colleague.
 """
-
 # Detailed NLU Extraction Prompt
 EXTRACT_SYSTEM = """You are an information extraction engine for a corporate receptionist system.
 Given a visitor's spoken input, extract structured data and return ONLY a valid JSON object.
@@ -133,7 +131,9 @@ def _build_system_message(company_info: Optional[dict] = None) -> str:
     current_time_str = now.strftime("%A, %B %d, %Y at %I:%M %p")
 
     # CALCULATE GREETING ONCE HERE
-    hour = now().hour
+    # FIX: changed now().hour to now.hour
+    hour = now.hour
+
     if 5 <= hour < 12:
         greeting = "Good Morning"
     elif 12 <= hour < 17:
@@ -144,7 +144,7 @@ def _build_system_message(company_info: Optional[dict] = None) -> str:
     system = (
         BASE_SYSTEM_PROMPT
         + f"\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        + f"CURRENT GREETING: {greeting}\n"  # FORCE THE GREETING
+        + f"CURRENT GREETING: {greeting}\n"
         + f"CURRENT DATE & TIME: {current_time_str}\n"
         + f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     )
