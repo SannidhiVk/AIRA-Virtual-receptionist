@@ -337,8 +337,11 @@ def verify_employee_face(audio_name: str, image_b64: str) -> dict:
     except Exception as e:
         error_msg = str(e)
         is_no_face = (
-            "Face could not be detected" in error_msg or "FaceNotDetected" in error_msg
+            "Face could not be detected" in error_msg
+            or "FaceNotDetected" in error_msg
+            or "Exception while processing img" in error_msg
         )
+
         if is_no_face:
             logger.debug(
                 "No face detected in frame for employee '%s' — silent, not a strike.",
