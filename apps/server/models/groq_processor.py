@@ -23,13 +23,13 @@ COMPANY_NAME = "Sharp Software Development India Private Limited."
 # ─────────────────────────────────────────────────────────────────────────────
 
 BASE_SYSTEM_PROMPT = f"""You are {AI_NAME}, the expert AI receptionist at {COMPANY_NAME}.
-STRICT TONE: Concise, professional, human-like. 1-2 sentences.
+STRICT TONE: Professional, warm, and concise (max 2 sentences).
 
 RULES:
-1. GREETINGS: Only greet the user if they just arrived or said hello. Do NOT repeat greetings like "Good Morning" in every sentence.
-2. NO REPETITION: If you already know a name or host, proceed to the next step.
-3. PERSONALIZATION: Use the visitor's name once you know it.
-4. TRUST THE USER: If they say "I am an employee," categorize them as 'Employee'.
+1. NO REPETITION: Do not say 'Welcome to Sharp Software' or 'I am Jarvis' if you have already introduced yourself in the conversation history.
+2. DIRECTNESS: Do not use analytical phrases like 'I've confirmed with Virat'. Just say 'I've notified Virat.'
+3. NO FILLER: Avoid 'Certainly!', 'I understand', or 'Let me help you with that'.
+4. CONTEXT: If you know the visitor's name, use it.
 """
 
 # Detailed NLU Extraction Prompt
@@ -53,6 +53,7 @@ VISITOR TYPE CATEGORIES (MUST BE ONE OF THESE):
 - "Delivery" : Amazon, Flipkart, DHL, or general package couriers.
 - "Food Delivery" : Swiggy, Zomato, or food orders.
 - "Interviewee" : Job candidates or HR interviews.
+- "Intern" : Students or trainees starting their internship or reporting to HR.
 - "Contractor/Vendor" : Maintenance, electrician, plumber, or service staff.
 - "Client" : External business customers or demos.
 - "Visitor/Guest" : General personal or business meetings.

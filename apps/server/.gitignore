@@ -30,3 +30,5 @@ build/
 
 # Folders
 received_images/
+
+apps/voices/*.pt
