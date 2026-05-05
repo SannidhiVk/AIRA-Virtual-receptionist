@@ -44,6 +44,8 @@ class Visitor(Base):
     email = Column(String, unique=True, nullable=True)
     phone = Column(String, nullable=True)
     id_photo_path = Column(String)
+    first_seen = Column(DateTime, default=datetime.utcnow)
+    last_seen = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
     meetings = relationship("Meeting", back_populates="visitor")

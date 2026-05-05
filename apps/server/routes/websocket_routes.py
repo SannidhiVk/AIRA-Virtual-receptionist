@@ -23,8 +23,11 @@ from services.wake_word_service import get_wake_word_service
 # --- Other imports remain the same ---
 from services.face_recognition_service import verify_person_face, warmup_deepface
 
-# Thread pool for running blocking DeepFace calls without blocking the async event loop
-_face_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="deepface")
+# Thread pool for running blocking DeepFace calls without blocking the async event loop.
+# 2 workers: one for _resolve_employee_name (DB fuzzy lookup) and one for verify_person_face
+# (DeepFace). With only 1 worker, a DB lookup submitted first can starve the face verification
+# submitted immediately after, causing the session to time out before the camera frame arrives.
+_face_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="deepface")
 
 # Trigger model warmup immediately when the server file is loaded
 _face_executor.submit(warmup_deepface)
@@ -97,6 +100,8 @@ _NAME_STOPWORDS = frozenset(
         "uh",
         "ok",
         "okay",
+        "yeah",
+        "yep",
     }
 )
 
@@ -272,10 +277,12 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         "is_verified": False,
         "visitor_reference_image_b64": None,
         "pending_identity_name": None,
-        "person_type": "employee",  # "employee" or "visitor"
+        "person_type": "employee",
         "mismatch_strikes": 0,
         "face_verify_in_progress": False,
-        "conversation_complete": False,  # True after the terminal AI response (e.g. Slack sent)
+        "conversation_complete": False,
+        "visitor_captured": False,  # ← ADD
+        "brain_is_thinking": False,  # ← ADD
     }
 
     try:
@@ -299,7 +306,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             oww_carry = bytearray()
             audio_buffer = bytearray()
             speech_seen = False
-            followup_entered_at = 0.0
+            followup_entered_at = (
+                time.time()
+            )  # safe default — prevents stale timeout on first FOLLOWUP
             previous_mode = session_state["mode"]
             bytes_received_count = 0
 
@@ -322,9 +331,13 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     oww_carry.clear()
                     audio_buffer.clear()
                     speech_seen = False
+                    followup_entered_at = (
+                        time.time()
+                    )  # reset so next session can't inherit a stale clock
                     session_state["is_verified"] = False
                     session_state["verified_name"] = None  # <--- ADD THIS
                     session_state["visitor_reference_image_b64"] = None
+                    session_state["visitor_captured"] = False  # ← ADD THIS
                     session_state["pending_identity_name"] = None
                     session_state["person_type"] = "employee"
                     session_state["mismatch_strikes"] = 0
@@ -337,11 +350,15 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 elif current_mode == "FOLLOWUP" and previous_mode != "FOLLOWUP":
                     audio_buffer.clear()
                     speech_seen = False
-                    followup_entered_at = time.time()
                     bytes_received_count = 0
                     logger.info(
                         f"[{client_id}] Entered FOLLOWUP/LISTENING mode. Waiting for audio..."
                     )
+                    # Don't start the timeout clock while waiting for capture_reference.
+                    # The camera round-trip can take seconds on slow hardware.
+                    # Clock starts once capture completes and pending_text is queued.
+                    if not session_state.get("awaiting_face"):
+                        followup_entered_at = time.time()
 
                 previous_mode = current_mode
 
@@ -391,8 +408,21 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                 person_type == "visitor"
                                 and session_action == "capture_reference"
                             ):
-                                session_state["visitor_reference_image_b64"] = image_b64
+                                # ── VISITOR: Use DB-backed photo deduplication ──────
+                                # On first visit: saves the photo to DB
+                                # On return visit: compares live frame against stored photo
+                                loop = asyncio.get_event_loop()
+                                result = await loop.run_in_executor(
+                                    _face_executor,
+                                    lambda: verify_person_face(
+                                        person_type="visitor",
+                                        audio_name=audio_name,
+                                        image_b64=image_b64,
+                                    ),
+                                )
+
                                 session_state["is_verified"] = True
+                                session_state["visitor_captured"] = True
                                 session_state["pending_identity_name"] = None
 
                                 try:
@@ -400,42 +430,56 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                         json.dumps(
                                             {
                                                 "type": "face_verification_result",
-                                                "verified": True,
-                                                "distance": -1.0,
+                                                "verified": result.get(
+                                                    "verified", True
+                                                ),
+                                                "distance": result.get(
+                                                    "distance", -1.0
+                                                ),
                                                 "audio_name": audio_name,
-                                                "has_photo": True,
-                                                "message": "",
+                                                "has_photo": result.get(
+                                                    "has_photo", True
+                                                ),
+                                                "message": result.get("message", ""),
                                                 "person_type": person_type,
                                                 "session_action": session_action,
                                                 "reference_captured": True,
+                                                "is_new": result.get("is_new", True),
+                                                "visitor_id": result.get("visitor_id"),
                                             }
                                         )
                                     )
                                 except Exception as e:
                                     logger.warning(
-                                        f"[{client_id}] Could not send visitor reference result. Error: {e}"
+                                        f"[{client_id}] Could not send visitor result. Error: {e}"
                                     )
                                     break
+
+                                # AFTER:
                                 pending_text = session_state.get("pending_text")
                                 if pending_text:
+                                    session_state["mode"] = (
+                                        "PROCESSING"  # ← block listener while LLM runs
+                                    )
+                                    await websocket.send_text(
+                                        json.dumps({"state": "processing"})
+                                    )
                                     await text_queue.put(pending_text)
                                     session_state["pending_text"] = None
+                                    logger.info(
+                                        f"[{client_id}] Visitor photo processed — queuing LLM response."
+                                    )
                                 else:
-                                    # Fallback: reset mode so the server isn't permanently deaf
                                     session_state["mode"] = "PASSIVE"
                                     await websocket.send_text(
                                         json.dumps({"state": "passive"})
                                     )
 
                                 session_state["face_verify_in_progress"] = False
+                                # Visitor capture/compare is done — stop accepting face frames
+                                session_state["conversation_complete"] = True
                                 continue
 
-                            reference_image_b64 = ""
-                            if person_type == "visitor":
-                                reference_image_b64 = (
-                                    session_state.get("visitor_reference_image_b64")
-                                    or ""
-                                )
                             was_already_verified = session_state.get(
                                 "is_verified", False
                             )
@@ -447,7 +491,6 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                     person_type=person_type,
                                     audio_name=audio_name,
                                     image_b64=image_b64,
-                                    reference_image_b64=reference_image_b64,
                                 ),
                             )
                             session_state["face_verify_in_progress"] = False
@@ -457,9 +500,15 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                     audio_name  # <--- ADD THIS
                                 )
                                 session_state["pending_identity_name"] = None
+                                # Face verified — restart the FOLLOWUP timeout clock now
+                                # (it was parked at +3600 while we waited for the camera frame)
+                                followup_entered_at = time.time()
                             elif person_type == "employee":
                                 session_state["is_verified"] = False
                                 session_state["pending_identity_name"] = audio_name
+                                # Restart the clock even on mismatch so the user gets a
+                                # chance to hear the rejection message and try again
+                                followup_entered_at = time.time()
 
                             logger.info(
                                 f"[{client_id}] Face verify result for '{audio_name}': "
@@ -607,6 +656,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     if (
                         current_mode == "FOLLOWUP"
                         and not speech_seen
+                        and not session_state.get("brain_is_thinking")  # ← ADD
                         and (
                             time.time() - followup_entered_at > FOLLOWUP_TIMEOUT_SECONDS
                         )
@@ -701,7 +751,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
                                     employee_name = None
 
-                                    if not session_state.get("is_verified"):
+                                    if not session_state.get(
+                                        "is_verified"
+                                    ) and not session_state.get("visitor_captured"):
                                         known_name = session_state.get("verified_name")
                                         if known_name:
                                             employee_name = known_name
@@ -745,6 +797,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                                         break
 
                                     # If we found a name, trigger face capture/verification
+                                    # If we found a name, trigger face capture/verification
                                     if employee_name:
                                         person_type = session_state["person_type"]
                                         logger.info(
@@ -758,15 +811,32 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                         )
                                         session_state["pending_text"] = text
 
+                                        # Switch to FOLLOWUP so face frames are not blocked
+                                        # by the PROCESSING guard, and clear the audio buffer
+                                        # so the same utterance is not re-processed in a loop.
+                                        # NOTE: followup_entered_at is NOT set here.
+                                        # awaiting_face=True means the FOLLOWUP transition guard
+                                        # will defer the clock until capture_reference completes.
+                                        session_state["mode"] = "FOLLOWUP"
+                                        audio_buffer.clear()
+                                        speech_seen = False
+                                        # Park the timeout clock far in the future so the
+                                        # FOLLOWUP timeout check cannot fire while we are
+                                        # waiting for the camera frame from the frontend.
+                                        # The clock is restarted in two places:
+                                        #   • capture_reference handler (visitor path)
+                                        #   • after face_verify_in_progress clears (employee path)
+                                        followup_entered_at = time.time() + 3600
+                                        await websocket.send_text(
+                                            json.dumps({"state": "listening"})
+                                        )
+
                                         try:
                                             await websocket.send_text(
                                                 json.dumps(
                                                     {
                                                         "type": "employee_identified",
                                                         "name": employee_name,
-                                                        # Tell the frontend what to do:
-                                                        # visitor → capture_reference (session photo)
-                                                        # employee → compare_reference (DB match)
                                                         "person_type": person_type,
                                                         "session_action": (
                                                             "capture_reference"
@@ -791,7 +861,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                             "SYSTEM:Please complete face verification before continuing."
                                         )
                                     else:
-                                        # If already verified OR no name found, just chat normally!
+                                        # Already verified OR no name found — chat normally
                                         await text_queue.put(text)
 
         async def brain():
@@ -819,6 +889,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 # --------------------------------
 
                 manager.client_state[client_id] = "THINKING"
+                session_state["brain_is_thinking"] = True
 
                 # --- BYPASS LLM FOR SYSTEM MESSAGES ---
                 if text and text.startswith("SYSTEM:"):
@@ -833,6 +904,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         prompt_text = text
 
                     reply_text = await process_text_for_client(client_id, prompt_text)
+                    session_state["brain_is_thinking"] = False
 
                 logger.info(f"[{client_id}] AI Response generated: '{reply_text}'")
 
@@ -883,13 +955,14 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         await websocket.send_text(json.dumps({"state": "listening"}))
                     # --------------------------------
 
-                except RuntimeError:
+                except (RuntimeError, WebSocketDisconnect):
                     # This catches the error if the user closes the tab
                     logger.info(
                         f"[{client_id}] Client disconnected before AI could finish responding."
                     )
                     break
                 finally:
+                    session_state["brain_is_thinking"] = False
                     # This ensures the queue is ALWAYS marked as done, even if it errors or continues
                     text_queue.task_done()
 
