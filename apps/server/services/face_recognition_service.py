@@ -1,42 +1,22 @@
 """
 face_recognition_service.py
-----------------------------
-Verifies an employee's identity by comparing a live camera frame
-(captured from the frontend) against the photo stored in the database.
+---------------------------
+Shared face verification helpers for:
+- employees matched against a stored DB photo
+- visitors matched only against a reference frame captured in the current session
 
-HOW IT WORKS:
-1. The frontend captures ONE JPEG frame when the employee says their name.
-2. That frame is sent as base64 over WebSocket with the spoken name.
-3. This service:
-   a) Looks up the employee by name in the DB → gets their photo_path
-   b) Runs DeepFace.verify(stored_photo, live_frame) using the Facenet512 model
-   c) Saves the live frame to a captures folder for cross-verification
-   d) Returns a structured result: { verified, distance, message }
-
-WHY DeepFace + Facenet512:
-- pip install only — no cmake/dlib build issues on Windows
-- Facenet512 gives ~99.6% LFW accuracy, better than Facenet128
-- Works fully on CPU (no GPU needed)
-- enforce_detection=False = graceful fallback when face is partially out of frame
-- Captures are saved to receptionist/photos/captures/ so you can visually
-  inspect what the camera actually sent and compare against the stored photo.
-
-TROUBLESHOOTING distance ≈ 1.0 (guaranteed mismatch):
-- Distance of 1.082 (>1.0) means face was NOT detected in one or both images.
-  DeepFace then compares raw pixel embeddings → always huge distance.
-- Fix: ensure the stored photo and live frame both contain a clearly visible,
-  front-facing face. Check the saved captures in receptionist/photos/captures/.
-- Use FACE_VERIFY_DETECTOR env var to try 'retinaface' or 'mtcnn' for better
-  detection (slower but much more robust than default 'opencv').
+Diagnostic captures are saved only for mismatches/errors and are cleaned up based
+on the configured retention window.
 """
 
 import base64
 import logging
 import os
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
+import numpy as np
 
 # --- ADD THESE TWO LINES ---
 from dotenv import load_dotenv
@@ -54,21 +34,28 @@ DETECTOR_BACKEND = os.getenv("FACE_VERIFY_DETECTOR", "mtcnn")
 
 # Model name
 MODEL_NAME = os.getenv("FACE_VERIFY_MODEL", "ArcFace")
+CAPTURE_RETENTION_DAYS = int(os.getenv("CAPTURE_RETENTION_DAYS", "7"))
 
 # Photo storage root — relative to this file's location (apps/server/)
 PHOTOS_DIR = (
     Path(__file__).resolve().parent.parent / "receptionist" / "photos" / "employees"
 )
 
-# Captures directory — live frames are saved here for cross-verification
+# Visitor photos — separate directory for clean separation and easier bulk cleanup
+VISITOR_PHOTOS_DIR = (
+    Path(__file__).resolve().parent.parent / "receptionist" / "photos" / "visitors"
+)
+
+# Captures directory — diagnostic frames saved here for mismatches/errors
 CAPTURES_DIR = (
     Path(__file__).resolve().parent.parent / "receptionist" / "photos" / "captures"
 )
 
 
 def _ensure_photos_dir() -> None:
-    """Create the photos directory and captures directory if they don't exist yet."""
+    """Create all photo directories if they don't exist yet."""
     PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
+    VISITOR_PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
     CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -77,33 +64,151 @@ def get_photo_path(employee_id: int) -> Path:
     return PHOTOS_DIR / f"{employee_id}.jpg"
 
 
+def warmup_deepface():
+    """
+    Runs a dummy verification in the background on startup.
+    This forces TensorFlow and the ArcFace/MTCNN models to load into memory
+    so the first user doesn't experience a 40-second delay.
+    """
+    logger.info("Starting DeepFace warmup sequence in the background...")
+    try:
+        from deepface import DeepFace
+
+        # Create a dummy blank 224x224 image
+        dummy_img = np.zeros((224, 224, 3), dtype=np.uint8)
+
+        # Run a fake verification with enforce_detection=False so it doesn't crash on the blank image
+        DeepFace.verify(
+            img1_path=dummy_img,
+            img2_path=dummy_img,
+            model_name=MODEL_NAME,
+            detector_backend=DETECTOR_BACKEND,
+            enforce_detection=False,
+        )
+        logger.info("✅ DeepFace warmup complete! Live requests will now be fast.")
+    except Exception as e:
+        logger.warning(f"DeepFace warmup failed: {e}")
+
+
 def _save_capture(
-    image_b64: str, employee_name: str, verified: bool, distance: float
+    image_b64: str, subject_name: str, verified: bool, distance: float, reason: str
 ) -> Optional[Path]:
     """
-    Save the live capture to CAPTURES_DIR for cross-verification.
-    Filename format: <timestamp>_<employee>_<result>_d<distance>.jpg
-    Returns the saved path, or None on failure.
+    Save a diagnostic capture to CAPTURES_DIR for mismatches or errors only.
+    Routes to 'employees' or 'visitor_sessions' subfolders based on the reason.
     """
+    if CAPTURE_RETENTION_DAYS <= 0:
+        logger.info(
+            "Capture saving disabled via CAPTURE_RETENTION_DAYS=%s",
+            CAPTURE_RETENTION_DAYS,
+        )
+        return None
+
     try:
-        # Strip data URL prefix if present
         raw_b64 = image_b64
         if "," in raw_b64:
             raw_b64 = raw_b64.split(",", 1)[1]
 
         image_bytes = base64.b64decode(raw_b64)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_name = employee_name.replace(" ", "_")[:30]
+        safe_name = subject_name.replace(" ", "_")[:30] or "unknown"
+        safe_reason = reason.replace(" ", "_")[:20]
         result_tag = "MATCH" if verified else "MISMATCH"
         dist_tag = f"d{distance:.3f}".replace(".", "p")
-        filename = f"{ts}_{safe_name}_{result_tag}_{dist_tag}.jpg"
-        save_path = CAPTURES_DIR / filename
+        filename = f"{ts}_{safe_name}_{safe_reason}_{result_tag}_{dist_tag}.jpg"
+
+        # --- NEW ROUTING LOGIC ---
+        if "employee" in reason.lower():
+            target_dir = CAPTURES_DIR / "employees"
+        elif "visitor" in reason.lower():
+            target_dir = CAPTURES_DIR / "visitor_sessions"
+        else:
+            target_dir = CAPTURES_DIR
+
+        # Ensure the subfolder exists before saving
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        save_path = target_dir / filename
+        # -------------------------
+
         save_path.write_bytes(image_bytes)
         logger.info("Capture saved to: %s", save_path)
         return save_path
     except Exception as e:
-        logger.warning("Could not save capture for '%s': %s", employee_name, e)
+        logger.warning("Could not save capture for '%s': %s", subject_name, e)
         return None
+
+
+def cleanup_old_captures(max_age_days: Optional[int] = None) -> int:
+    """
+    Remove capture JPEGs and visitor photos older than the retention period.
+    - Diagnostic captures in CAPTURES_DIR (and subdirs) → deleted after retention_days
+    - Visitor photos in VISITOR_PHOTOS_DIR → deleted after retention_days + DB cleared
+    Returns the number of deleted files.
+    """
+    _ensure_photos_dir()
+    retention_days = CAPTURE_RETENTION_DAYS if max_age_days is None else max_age_days
+    if retention_days <= 0:
+        logger.info("Capture cleanup skipped because retention is disabled.")
+        return 0
+
+    cutoff = datetime.now() - timedelta(days=retention_days)
+    deleted = 0
+
+    # 1. Clean diagnostic captures (recurse into subdirs)
+    for file_path in CAPTURES_DIR.rglob("*.jpg"):
+        try:
+            modified_at = datetime.fromtimestamp(file_path.stat().st_mtime)
+            if modified_at < cutoff:
+                file_path.unlink()
+                deleted += 1
+        except Exception as e:
+            logger.warning("Failed to clean up capture '%s': %s", file_path, e)
+
+    # 2. Clean old visitor photos and clear DB references
+    for file_path in VISITOR_PHOTOS_DIR.glob("*.jpg"):
+        try:
+            modified_at = datetime.fromtimestamp(file_path.stat().st_mtime)
+            if modified_at < cutoff:
+                # Extract visitor ID from filename (e.g. "42.jpg" → 42)
+                try:
+                    visitor_id = int(file_path.stem)
+                    _clear_visitor_photo_in_db(visitor_id)
+                except ValueError:
+                    pass
+                file_path.unlink()
+                deleted += 1
+        except Exception as e:
+            logger.warning("Failed to clean up visitor photo '%s': %s", file_path, e)
+
+    if deleted:
+        logger.info(
+            "Removed %s file(s) older than %s days (captures + visitor photos).",
+            deleted,
+            retention_days,
+        )
+    return deleted
+
+
+def _clear_visitor_photo_in_db(visitor_id: int) -> None:
+    """Clear the id_photo_path field in the visitors table after photo cleanup."""
+    try:
+        from receptionist.database import SessionLocal
+        from receptionist.models import Visitor
+
+        session = SessionLocal()
+        try:
+            visitor = session.query(Visitor).filter(Visitor.id == visitor_id).first()
+            if visitor and visitor.id_photo_path:
+                visitor.id_photo_path = None
+                session.commit()
+                logger.info(
+                    "Cleared photo path for visitor ID %d after cleanup.", visitor_id
+                )
+        finally:
+            session.close()
+    except Exception as e:
+        logger.warning("Failed to clear visitor %d photo path in DB: %s", visitor_id, e)
 
 
 def decode_b64_to_tempfile(image_b64: str) -> Optional[str]:
@@ -132,6 +237,73 @@ def decode_b64_to_tempfile(image_b64: str) -> Optional[str]:
         return None
 
 
+def _run_face_comparison(
+    reference_path: str, live_path: str, subject_name: str, mismatch_message: str
+) -> dict:
+    from deepface import DeepFace  # Lazy import — only loaded when first used
+
+    logger.info(
+        "Running DeepFace.verify | model=%s | detector=%s | reference=%s | live=%s",
+        MODEL_NAME,
+        DETECTOR_BACKEND,
+        reference_path,
+        live_path,
+    )
+
+    result = DeepFace.verify(
+        img1_path=reference_path,
+        img2_path=live_path,
+        model_name=MODEL_NAME,
+        detector_backend=DETECTOR_BACKEND,
+        enforce_detection=True,
+        distance_metric="cosine",
+        align=True,
+    )
+
+    verified: bool = result.get("verified", False)
+    distance: float = result.get("distance", 1.0)
+    deepface_threshold = result.get("threshold", VERIFY_THRESHOLD)
+    logger.info(
+        "DeepFace raw result | distance=%.4f | deepface_threshold=%.4f | our_threshold=%.2f",
+        distance,
+        deepface_threshold,
+        VERIFY_THRESHOLD,
+    )
+
+    if distance > 0.9:
+        logger.warning(
+            "Distance %.4f is suspiciously high (>0.9) for '%s' — face likely not detected.",
+            distance,
+            subject_name,
+        )
+
+    if distance > VERIFY_THRESHOLD:
+        verified = False
+
+    logger.info(
+        "Face verify for '%s': verified=%s, distance=%.4f (threshold=%.2f)",
+        subject_name,
+        verified,
+        distance,
+        VERIFY_THRESHOLD,
+    )
+
+    message = (
+        f"Identity verified for {subject_name}. You can proceed with your question or request."
+        if verified
+        else mismatch_message
+    )
+
+    return {
+        "verified": verified,
+        "distance": round(distance, 4),
+        "message": message,
+        "has_photo": True,
+        "face_detected": True,
+        "capture_dir": str(CAPTURES_DIR),
+    }
+
+
 def verify_employee_face(audio_name: str, image_b64: str) -> dict:
     """
     Main verification function called from the WebSocket handler.
@@ -157,9 +329,9 @@ def verify_employee_face(audio_name: str, image_b64: str) -> dict:
     if not employee:
         logger.warning("Face verify: employee '%s' not found in DB.", audio_name)
         return {
-            "verified": True,  # Can't verify → don't block the flow
+            "verified": False,
             "distance": -1.0,
-            "message": "",
+            "message": f"I could not find an employee record for {audio_name}. Please confirm the name and try again.",
             "has_photo": False,
             "employee_id": None,
         }
@@ -173,119 +345,70 @@ def verify_employee_face(audio_name: str, image_b64: str) -> dict:
             audio_name,
         )
         return {
-            "verified": True,  # No photo to compare → don't block
+            "verified": False,
             "distance": -1.0,
-            "message": "",
+            "message": f"I do not have a face photo on file for {audio_name}, so I cannot verify this identity yet.",
             "has_photo": False,
             "employee_id": employee.id,
         }
 
-    # ── Step 3: Write the live frame to a temp file ───────────────────────────
     tmp_path = decode_b64_to_tempfile(image_b64)
     if not tmp_path:
         return {
-            "verified": True,  # Decode failure → don't block
+            "verified": False,
             "distance": -1.0,
-            "message": "",
+            "message": "I could not read the camera frame for face verification. Please try again.",
             "has_photo": True,
             "employee_id": employee.id,
         }
 
-    # ── Step 4: Run DeepFace comparison ───────────────────────────────────────
     try:
-        from deepface import DeepFace  # Lazy import — only loaded when first used
-
-        logger.info(
-            "Running DeepFace.verify | model=%s | detector=%s | stored=%s | live=%s",
-            MODEL_NAME,
-            DETECTOR_BACKEND,
-            stored_photo_path,
+        result = _run_face_comparison(
+            str(stored_photo_path),
             tmp_path,
-        )
-
-        result = DeepFace.verify(
-            img1_path=str(stored_photo_path),  # Employee's stored photo from DB
-            img2_path=tmp_path,  # Live capture from webcam
-            model_name=MODEL_NAME,  # Facenet512 — higher accuracy than Facenet128
-            detector_backend=DETECTOR_BACKEND,  # Configurable via env var
-            enforce_detection=True,  # Don't crash if face isn't perfectly detected
-            distance_metric="cosine",  # Works well with Facenet family
-            align=True,  # Face alignment greatly improves accuracy
-        )
-
-        verified: bool = result.get("verified", False)
-        distance: float = result.get("distance", 1.0)
-
-        # Log raw DeepFace threshold vs our custom threshold
-        # Log raw DeepFace threshold vs our custom threshold
-        deepface_threshold = result.get("threshold", VERIFY_THRESHOLD)
-        logger.info(
-            "DeepFace raw result | distance=%.4f | deepface_threshold=%.4f | our_threshold=%.2f",
-            distance,
-            deepface_threshold,
-            VERIFY_THRESHOLD,
-        )
-
-        # Distance > 0.9 almost certainly means face was NOT detected.
-        if distance > 0.9:
-            logger.warning(
-                "Distance %.4f is suspiciously high (>0.9) for '%s' — "
-                "face likely NOT detected in stored photo or live frame. "
-                "Check stored photo at: %s  |  Check live capture in CAPTURES_DIR.",
-                distance,
-                audio_name,
-                stored_photo_path,
-            )
-
-        # Override with our own threshold for extra control
-        if distance > VERIFY_THRESHOLD:
-            verified = False
-
-        logger.info(
-            "Face verify for '%s': verified=%s, distance=%.4f (threshold=%.2f)",
             audio_name,
-            verified,
-            distance,
-            VERIFY_THRESHOLD,
-        )
-
-        if verified:
-            message = (
-                f"Identity verified for {audio_name}. "
-                f"You can proceed with your question or request."
-            )
-        else:
-            message = (
+            (
                 f"I can see someone in the camera, but it doesn't quite match "
                 f"the photo we have on file for {audio_name}. "
                 f"Could you confirm your identity?"
+            ),
+        )
+        if not result["verified"]:
+            _save_capture(
+                image_b64, audio_name, False, result["distance"], "employee_mismatch"
             )
 
-        # ── Step 5: Save the live capture for cross-verification ─────────────
-        _save_capture(image_b64, audio_name, verified, distance)
-
-        return {
-            "verified": verified,
-            "distance": round(distance, 4),
-            "message": message,
-            "has_photo": True,
-            "employee_id": employee.id,
-            "capture_dir": str(CAPTURES_DIR),
-        }
+        return {**result, "employee_id": employee.id}
 
     except Exception as e:
-        logger.error(
-            "DeepFace verification failed for '%s': %s", audio_name, e, exc_info=True
+        error_msg = str(e)
+        is_no_face = (
+            "Face could not be detected" in error_msg
+            or "FaceNotDetected" in error_msg
+            or "Exception while processing img" in error_msg
         )
-        # Save the raw capture even on error so you can inspect it
-        _save_capture(image_b64, audio_name, False, -1.0)
 
-        # --- UPDATE THIS RETURN BLOCK ---
-        # Do NOT return verified: True on a crash. Return False and a message.
+        if is_no_face:
+            logger.debug(
+                "No face detected in frame for employee '%s' — silent, not a strike.",
+                audio_name,
+            )
+            message = "I cannot see your face clearly. Please step into the camera frame so I can verify you."
+        else:
+            logger.error(
+                "DeepFace verification failed for '%s': %s",
+                audio_name,
+                e,
+                exc_info=True,
+            )
+            _save_capture(image_b64, audio_name, False, -1.0, "employee_error")
+            message = "I'm sorry, I encountered an error while trying to verify your face. Please try again."
+
         return {
             "verified": False,
             "distance": -1.0,
-            "message": "I'm sorry, I encountered an error while trying to verify your face. Please try again.",
+            "face_detected": False,
+            "message": message,
             "has_photo": True,
             "employee_id": employee.id,
         }
@@ -296,6 +419,192 @@ def verify_employee_face(audio_name: str, image_b64: str) -> dict:
             os.unlink(tmp_path)
         except Exception:
             pass
+
+
+def get_visitor_photo_path(visitor_id: int) -> Path:
+    """Return the expected disk path for a visitor's stored photo."""
+    return VISITOR_PHOTOS_DIR / f"{visitor_id}.jpg"
+
+
+def save_visitor_photo_from_b64(visitor_id: int, image_b64: str) -> Optional[Path]:
+    """
+    Save a visitor's first-visit photo from a base64 camera frame.
+    Returns the saved path, or None on failure.
+    """
+    _ensure_photos_dir()
+    try:
+        raw_b64 = image_b64
+        if "," in raw_b64:
+            raw_b64 = raw_b64.split(",", 1)[1]
+        image_bytes = base64.b64decode(raw_b64)
+        save_path = get_visitor_photo_path(visitor_id)
+        save_path.write_bytes(image_bytes)
+        logger.info(
+            "Saved first-visit photo for visitor ID %d at %s", visitor_id, save_path
+        )
+        return save_path
+    except Exception as e:
+        logger.error("Failed to save visitor %d photo: %s", visitor_id, e)
+        return None
+
+
+def verify_visitor_face(visitor_name: str, image_b64: str) -> dict:
+    """
+    Visitor face recognition with deduplication.
+
+    FLOW:
+    1. Look up visitor by name in DB (get_or_create_visitor)
+    2. If visitor has a stored photo (returning visitor):
+       → DeepFace verify live frame vs stored photo
+       → If MATCH: log visit, greet "Welcome back!"
+       → If MISMATCH: could be same name different person → create new visitor
+    3. If visitor has NO photo (first visit):
+       → Save the captured frame as their photo
+       → Greet "Welcome! I've noted your visit."
+
+    Returns:
+        {
+            "verified":    bool
+            "distance":    float
+            "is_new":      bool   — True if this is a first-time visitor
+            "visitor_id":  int
+            "message":     str    — Greeting text for Jarvis TTS
+            "has_photo":   bool
+        }
+    """
+    _ensure_photos_dir()
+
+    # ── Step 1: Get or create the visitor in DB ───────────────────────────────
+    visitor, is_new = _get_or_create_visitor_with_status(visitor_name)
+
+    if not visitor:
+        logger.error("Failed to get/create visitor for name '%s'", visitor_name)
+        return {
+            "verified": False,
+            "distance": -1.0,
+            "is_new": True,
+            "visitor_id": None,
+            "message": f"Welcome! I've noted your visit, {visitor_name}.",
+            "has_photo": False,
+        }
+
+    # ── Step 2: Check if visitor has a stored photo ───────────────────────────
+    stored_photo = get_visitor_photo_path(visitor.id)
+    has_stored_photo = bool(visitor.id_photo_path and stored_photo.exists())
+
+    if not has_stored_photo:
+        # FIRST VISIT — save the frame as their reference photo
+        saved = save_visitor_photo_from_b64(visitor.id, image_b64)
+        if saved:
+            _update_visitor_photo_path(
+                visitor.id, f"receptionist/photos/visitors/{visitor.id}.jpg"
+            )
+
+        return {
+            "verified": True,
+            "distance": 0.0,
+            "is_new": True,
+            "visitor_id": visitor.id,
+            "message": f"Welcome! I've noted your visit, {visitor_name}.",
+            "has_photo": bool(saved),
+        }
+
+    # ── Step 3: RETURNING VISITOR — compare live frame against stored photo ───
+    tmp_path = decode_b64_to_tempfile(image_b64)
+    if not tmp_path:
+        return {
+            "verified": False,
+            "distance": -1.0,
+            "is_new": False,
+            "visitor_id": visitor.id,
+            "message": "I could not read the camera frame. Please try again.",
+            "has_photo": True,
+        }
+
+    try:
+        result = _run_face_comparison(
+            str(stored_photo),
+            tmp_path,
+            visitor_name,
+            (
+                f"I see someone different from the {visitor_name} I met before. "
+                f"Could you confirm your identity?"
+            ),
+        )
+
+        if result["verified"]:
+            # Same person returning — update last_seen, no new photo
+            _bump_visitor_last_seen(visitor.id)
+            result["message"] = f"Welcome back, {visitor_name}! Good to see you again."
+            result["is_new"] = False
+        # AFTER:
+        else:
+            # Same name but DIFFERENT face — create a brand new visitor record
+            logger.info(
+                f"Face mismatch for '{visitor_name}' (distance={result['distance']:.3f}) "
+                f"— creating new visitor record."
+            )
+            new_visitor = _create_new_visitor(visitor_name)
+            if new_visitor:
+                saved = save_visitor_photo_from_b64(new_visitor.id, image_b64)
+                if saved:
+                    _update_visitor_photo_path(
+                        new_visitor.id,
+                        f"receptionist/photos/visitors/{new_visitor.id}.jpg",
+                    )
+                result["visitor_id"] = new_visitor.id
+                result["is_new"] = True
+                result["verified"] = True  # treat as fresh first-visit
+                result["distance"] = 0.0
+            else:
+                result["visitor_id"] = visitor.id
+                result["is_new"] = False
+
+        return result
+
+    except Exception as e:
+        error_msg = str(e)
+        is_no_face = (
+            "Face could not be detected" in error_msg or "FaceNotDetected" in error_msg
+        )
+        if is_no_face:
+            logger.debug("No face detected for visitor '%s'.", visitor_name)
+            message = (
+                "I cannot see your face clearly. Please step into the camera frame."
+            )
+        else:
+            logger.error("DeepFace failed for visitor '%s': %s", visitor_name, e)
+            _save_capture(image_b64, visitor_name, False, -1.0, "visitor_error")
+            message = "I encountered an error during verification. Please try again."
+
+        return {
+            "verified": False,
+            "distance": -1.0,
+            "face_detected": False,
+            "is_new": False,
+            "visitor_id": visitor.id,
+            "message": message,
+            "has_photo": True,
+        }
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+
+def verify_person_face(
+    *,
+    person_type: str,
+    image_b64: str,
+    audio_name: str = "",
+) -> dict:
+    """
+    Route verification to the correct strategy based on person_type.
+    """
+    if person_type == "visitor":
+        return verify_visitor_face(audio_name, image_b64)
+    return verify_employee_face(audio_name, image_b64)
 
 
 def _get_employee_by_name(name: str):
@@ -311,3 +620,98 @@ def _get_employee_by_name(name: str):
     except Exception as e:
         logger.error("DB lookup for employee '%s' failed: %s", name, e)
         return None
+
+
+def _get_or_create_visitor_with_status(name: str):
+    """
+    Look up a visitor by name, or create a new one.
+    Returns (visitor_obj, is_new: bool).
+    Uses the existing get_or_create_visitor from database.py.
+    """
+    try:
+        from receptionist.database import SessionLocal
+        from receptionist.models import Visitor
+
+        session = SessionLocal()
+        try:
+            # Check if visitor already exists (case-insensitive)
+            visitor = session.query(Visitor).filter(Visitor.name.ilike(name)).first()
+            if visitor:
+                return visitor, False
+            else:
+                # Create new visitor
+                visitor = Visitor(name=name)
+                session.add(visitor)
+                session.commit()
+                session.refresh(visitor)
+                return visitor, True
+        finally:
+            session.close()
+    except Exception as e:
+        logger.error("Failed to get/create visitor '%s': %s", name, e)
+        return None, True
+
+
+def _create_new_visitor(name: str):
+    """
+    Always creates a NEW visitor record regardless of existing records with same name.
+    Used when a face mismatch detects a different person sharing a name.
+    """
+    try:
+        from receptionist.database import SessionLocal
+        from receptionist.models import Visitor
+
+        session = SessionLocal()
+        try:
+            visitor = Visitor(name=name)
+            session.add(visitor)
+            session.commit()
+            session.refresh(visitor)
+            logger.info(
+                f"Created new visitor record for '{name}' (ID={visitor.id}) "
+                f"due to face mismatch with existing record."
+            )
+            return visitor
+        finally:
+            session.close()
+    except Exception as e:
+        logger.error("Failed to create new visitor for '%s': %s", name, e)
+        return None
+
+
+def _update_visitor_photo_path(visitor_id: int, photo_path: str) -> None:
+    """Set the id_photo_path field on a visitor after saving their first photo."""
+    try:
+        from receptionist.database import SessionLocal
+        from receptionist.models import Visitor
+
+        session = SessionLocal()
+        try:
+            visitor = session.query(Visitor).filter(Visitor.id == visitor_id).first()
+            if visitor:
+                visitor.id_photo_path = photo_path
+                session.commit()
+                logger.info("Set photo path for visitor %d: %s", visitor_id, photo_path)
+        finally:
+            session.close()
+    except Exception as e:
+        logger.error("Failed to update photo path for visitor %d: %s", visitor_id, e)
+
+
+def _bump_visitor_last_seen(visitor_id: int) -> None:
+    """Update the last_seen timestamp for a returning visitor."""
+    try:
+        from receptionist.database import SessionLocal
+        from receptionist.models import Visitor
+
+        session = SessionLocal()
+        try:
+            visitor = session.query(Visitor).filter(Visitor.id == visitor_id).first()
+            if visitor:
+                visitor.last_seen = datetime.utcnow()
+                session.commit()
+                logger.info("Bumped last_seen for visitor %d.", visitor_id)
+        finally:
+            session.close()
+    except Exception as e:
+        logger.error("Failed to bump last_seen for visitor %d: %s", visitor_id, e)

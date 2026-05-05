@@ -8,35 +8,61 @@ WAKE_WORD_GREETING = (
 
 
 async def process_text_for_client(client_id: str, text: str) -> str:
-    """
-    Process a user utterance and return the assistant response text.
-    """
-    if not text or not text.strip():
+    if not text:
         return ""
 
-    if text == WAKE_WORD_TRIGGER_TEXT:
-        try:
-            from services.query_router import clear_session_state
-            from models.groq_processor import GroqProcessor
+    if text == "WAKE_WORD_TRIGGERED":
+        from services.query_router import clear_session_state
 
-            # 1. Reset the session so we start completely fresh on a wake word
-            clear_session_state(client_id, retain_name=False)
+        clear_session_state(client_id)
 
-            # 2. Inject the hardcoded greeting into the LLM's memory
-            # This tells the LLM it ALREADY welcomed the user, preventing repeats!
-            llm = GroqProcessor.get_instance()
-            llm.client_history[client_id].append(
-                {"role": "assistant", "content": WAKE_WORD_GREETING}
+        # Correct Time Math
+        from datetime import datetime
+
+        hour = datetime.now().hour
+        if 5 <= hour < 12:
+            greeting = "Good Morning"
+        elif 12 <= hour < 17:
+            greeting = "Good Afternoon"
+        else:
+            greeting = "Good Evening"
+
+        bot_reply = f"{greeting}! Welcome to Sharp Software Development India Private Limited. I am Jarvis, how can I assist you today?"
+
+        # --- BULLETPROOF FIX: Find GroqProcessor dynamically from memory ---
+        import sys
+
+        GroqProcessor = None
+
+        # Search loaded modules for groq_processor
+        for mod_name, mod in list(sys.modules.items()):
+            if "groq_processor" in mod_name and hasattr(mod, "GroqProcessor"):
+                GroqProcessor = mod.GroqProcessor
+                break
+
+        # If found, inject the greeting into the AI's history
+        if GroqProcessor:
+            groq = GroqProcessor.get_instance()
+            if client_id not in groq.client_history:
+                groq.client_history[client_id] = []
+
+            groq.client_history[client_id].append(
+                {"role": "assistant", "content": bot_reply}
             )
-        except Exception as e:
-            logger.error(f"Failed to inject wake word context: {e}")
+        else:
+            from core.config import logger
 
-        return WAKE_WORD_GREETING
+            logger.warning("Could not find GroqProcessor in memory to inject history.")
+        # -------------------------------------------------------------------
+
+        return bot_reply
 
     try:
         from services.query_router import route_query
 
         return await route_query(client_id, text)
     except Exception as exc:
-        logger.error("route_query failed: %s", exc, exc_info=True)
+        from core.config import logger
+
+        logger.error(f"Routing error: {exc}")
         return "I'm sorry, I'm having trouble connecting to my systems."

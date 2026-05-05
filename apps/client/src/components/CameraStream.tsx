@@ -22,6 +22,12 @@ interface CameraStreamProps {
   onClose?: () => void;
   onStreamChange?: (stream: MediaStream | null) => void;
   autoStartSignal?: number;
+  // Continuous verification props (optional — feature is off when omitted)
+  isVerified?: boolean;
+  personType?: string; // "visitor" | "employee"
+  currentName?: string;
+  sendWebSocketMessage?: (payload: Record<string, unknown>) => void;
+  verificationIntervalMs?: number; // default: 3000
 }
 
 export interface CameraToggleButtonHandle {
@@ -31,7 +37,17 @@ export interface CameraToggleButtonHandle {
 // forwardRef lets the parent hold a ref to this component and call captureFrame()
 const CameraStream = forwardRef<CameraStreamHandle, CameraStreamProps>(
   function CameraStream(
-    { className = '', onClose, onStreamChange, autoStartSignal = 0 },
+    {
+      className = '',
+      onClose,
+      onStreamChange,
+      autoStartSignal = 0,
+      isVerified = false,
+      personType,
+      currentName,
+      sendWebSocketMessage,
+      verificationIntervalMs = 3000
+    },
     ref
   ) {
     const videoRef = useRef<HTMLVideoElement>(null);
@@ -240,6 +256,48 @@ const CameraStream = forwardRef<CameraStreamHandle, CameraStreamProps>(
         void startStream();
       }
     }, [autoStartSignal, isStreaming, startStream]);
+
+    // ── Continuous verification loop ───────────────────────────────────────────
+    // Runs only when:  isVerified=true  AND  personType="visitor"
+    // Sends a live frame every `verificationIntervalMs` ms via WebSocket so the
+    // backend can compare it against the stored reference image (DeepFace etc.).
+    useEffect(() => {
+      if (!isVerified || personType !== 'visitor' || !sendWebSocketMessage)
+        return;
+
+      console.log('✅ Reference captured! Starting 3-second background loop…');
+
+      const intervalId = setInterval(() => {
+        console.log('📸 Snapping background photo and sending to backend…');
+
+        const liveImageB64 = captureFrame();
+        if (liveImageB64) {
+          console.log(
+            `📡 Sending verify_face for "${currentName ?? ''}" (session_action: compare_reference)`
+          );
+          sendWebSocketMessage({
+            type: 'verify_face',
+            audio_name: currentName ?? '',
+            image_b64: liveImageB64,
+            session_action: 'compare_reference'
+          });
+        } else {
+          console.warn(
+            '⚠️ captureFrame() returned null — camera may not be streaming yet.'
+          );
+        }
+      }, verificationIntervalMs);
+
+      // Stop sending frames if the visitor is no longer verified or walks away
+      return () => clearInterval(intervalId);
+    }, [
+      isVerified,
+      personType,
+      currentName,
+      sendWebSocketMessage,
+      verificationIntervalMs,
+      captureFrame
+    ]);
 
     // Mouse down handler for dragging
     const handleMouseDown = useCallback((e: React.MouseEvent) => {
