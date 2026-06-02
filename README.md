@@ -57,17 +57,19 @@ Automate front-desk interactions, handle visitor check-ins, and answer queries i
 To make the AI Receptionist fully functional, you need to configure API keys for Emails, AI Inference, and Slack Notifications.
 Create your `.env` file in the `apps/server` directory with the following variables and fetch them using the steps below.
 
-### 1. Email Bot Credentials (For Sending Invites/Logs)
-Used by the system to send emails autonomously using Gmail SMTP.
+### 1. Google Workspace API Credentials (For Sending Invites/Logs)
+Used by the system to autonomously send emails and schedule meetings using Google Calendar and Gmail APIs.
 
-* **`EMAIL_SENDER`**: Your bot's Gmail address (e.g., `your.receptionist.bot@gmail.com`).
-* **`EMAIL_PASSWORD`**: A generated **App Password** (NOT your standard Google Account password).
+* **`credentials.json`**: Holds your Google Cloud OAuth 2.0 Client IDs.
+* **`token.json`**: Holds the saved session tokens after your bot authenticates.
   * **How to get it:**
-    1. Go to your [Google Account > Security tab](https://myaccount.google.com/security).
-    2. Ensure **2-Step Verification** is turned ON.
-    3. Search for **"App Passwords"** in the settings search bar.
-    4. Create a new app password (Name it "AIRA Bot"). It will generate a 16-character string.
-    5. Copy and paste it here *(without any spaces)*.
+    1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
+    2. Create a new project (e.g., "AIRA Virtual Receptionist").
+    3. Enable the **Gmail API** and **Google Calendar API** from the API Library.
+    4. Configure the **OAuth Consent Screen** (set it to External or Internal based on your org, and add scopes for Gmail and Calendar).
+    5. Go to **Credentials**, click **Create Credentials** → **OAuth client ID** (select Desktop App).
+    6. Download the resulting JSON file and save it exactly as `credentials.json` inside the `apps/server/` directory.
+    7. On first run, the python script will prompt you to log into a Google Account in your browser. This generates a `token.json` file automatically.
 
 ### 2. Groq API Keys (For LLM Intelligence)
 Powers the Llama-3 brain of the receptionist for lightning-fast conversations.
