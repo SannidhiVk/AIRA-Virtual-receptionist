@@ -175,19 +175,6 @@ _VISITOR_KEYWORDS = (
     "onboarding",
     "new employee",
     "starting today",
-    "interview",
-    "interviewing",
-    "intern",
-    "internship",
-    "delivery",
-    "courier",
-    "package",
-    "visitor",
-    "guest",
-    "joining",
-    "onboarding",
-    "appointment",
-    "visiting",
     "client",
     "sales demo",
     "demo",
@@ -368,7 +355,10 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     # got a reply and are in the middle of a conversation with a known visitor.
     _preserve_session = _existing and (
         _existing.get("awaiting_slack_reply")
-        or _existing.get("visitor_name") is not None
+        or (
+            _existing.get("visitor_name") is not None
+            and not _existing.get("conversation_complete")
+        )
     )
 
     if not _preserve_session:
@@ -527,7 +517,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
                             # Run MediaPipe detection in thread pool (non-blocking)
                             detection_service = get_person_detection_service()
-                            loop = asyncio.get_event_loop()
+                            loop = asyncio.get_running_loop()
                             result = await loop.run_in_executor(
                                 _face_executor,
                                 lambda: detection_service.detect_person(image_b64),
@@ -574,7 +564,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         # Frontend sends: { type: "verify_face", audio_name: "John", image_b64: "..." }
                         if msg.get("type") == "verify_face":
                             if session_state["mode"] == "PASSIVE":
-                                logger.info(...)
+                                logger.info(
+                                    f"[{client_id}] Ignoring face verify — session is PASSIVE."
+                                )
                                 continue
                             if session_state["mode"] in (
                                 "PROCESSING",
@@ -611,7 +603,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                 # ── VISITOR: Use DB-backed photo deduplication ──────
                                 # On first visit: saves the photo to DB
                                 # On return visit: compares live frame against stored photo
-                                loop = asyncio.get_event_loop()
+                                loop = asyncio.get_running_loop()
                                 result = await loop.run_in_executor(
                                     _face_executor,
                                     lambda: verify_person_face(
@@ -657,17 +649,17 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
                                 # AFTER:
                                 pending_text = session_state.get("pending_text")
+                                handled_by_pending = False
                                 if pending_text:
-                                    session_state["mode"] = (
-                                        "PROCESSING"  # ← block listener while LLM runs
-                                    )
+                                    session_state["mode"] = "PROCESSING"
                                     await websocket.send_text(
                                         json.dumps({"state": "processing"})
                                     )
                                     await text_queue.put(pending_text)
                                     session_state["pending_text"] = None
+                                    handled_by_pending = True
                                     logger.info(
-                                        f"[{client_id}] Visitor photo processed — queuing LLM response."
+                                        f"[{client_id}] Employee face match — resuming LLM response."
                                     )
                                 else:
                                     session_state["mode"] = "PASSIVE"
@@ -683,7 +675,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                             was_already_verified = session_state.get(
                                 "is_verified", False
                             )
-                            loop = asyncio.get_event_loop()
+                            loop = asyncio.get_running_loop()
 
                             result = await loop.run_in_executor(
                                 _face_executor,
@@ -724,6 +716,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                     session_state["pending_identity_name"] = None
                                     session_state["face_verify_in_progress"] = False
                                     session_state["conversation_complete"] = True
+
+                                    # ✅ Sync mismatch to query_router (flips is_employee to False)
+                                    mark_employee_from_face_result(client_id, False)
 
                                     try:
                                         await websocket.send_text(
@@ -785,17 +780,42 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                     audio_name  # <--- ADD THIS
                                 )
                                 session_state["pending_identity_name"] = None
+
+                                # ✅ Sync to query_router session state
+                                mark_employee_from_face_result(
+                                    client_id,
+                                    True,
+                                    employee_id=result.get("employee_id"),
+                                    employee_name=audio_name,
+                                )
+
                                 # Face verified — restart the FOLLOWUP timeout clock now
                                 # (it was parked at +3600 while we waited for the camera frame)
                                 followup_entered_at = time.time()
+
+                                # ✅ AFTER face verification: Trigger the LLM response if we had original text queued
+                                pending_text = session_state.get("pending_text")
+                                if pending_text:
+                                    session_state["mode"] = "PROCESSING"
+                                    await websocket.send_text(
+                                        json.dumps({"state": "processing"})
+                                    )
+                                    await text_queue.put(pending_text)
+                                    session_state["pending_text"] = None
+                                    logger.info(
+                                        f"[{client_id}] Employee face match — resuming LLM response."
+                                    )
+
                             elif person_type == "employee":
                                 result["message"] = (
                                     f"I wasn't able to verify you as {audio_name} from our employee records. "
                                     f"I'll check you in as a visitor — could you let me know who you're here to meet?"
                                 )
                                 session_state["is_verified"] = False
-                                # Name matched an employee but face didn't — treat as visitor
-                                # mark_employee_from_face_result already set is_employee=False in query_router state
+
+                                # ✅ Sync mismatch to query_router (flips is_employee to False)
+                                mark_employee_from_face_result(client_id, False)
+
                                 # Now flip this session to visitor mode so the visitor flow takes over
                                 session_state["person_type"] = "visitor"
                                 session_state["pending_identity_name"] = None
@@ -828,7 +848,10 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                     if not speech_seen:
                                         followup_entered_at = time.time()
                                         audio_buffer.clear()
-                                    if not was_already_verified:
+                                    if (
+                                        not was_already_verified
+                                        and not handled_by_pending
+                                    ):
                                         logger.info(
                                             f"[{client_id}] Initial face match — queueing confirmation."
                                         )
@@ -1082,7 +1105,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                                             candidates = (
                                                 _candidate_names_from_transcript(text)
                                             )
-                                            loop = asyncio.get_event_loop()
+                                            loop = asyncio.get_running_loop()
                                             employee_name = None
 
                                             # 1. ALWAYS check the DB first for any extracted name

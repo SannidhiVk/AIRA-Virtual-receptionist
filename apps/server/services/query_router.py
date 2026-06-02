@@ -583,10 +583,10 @@ def _merge_checkin_entities(
             state["visitor_name"] = new_name
 
     # ── Visitor type from context clues ──────────────────────────────────────
-    state["visitor_type"] = _determine_visitor_type(
-        user_query, entities.get("purpose", ""), state["visitor_type"]
-    )
-
+    if not state.get("is_employee"):
+        state["visitor_type"] = _determine_visitor_type(
+            user_query, entities.get("purpose", ""), state["visitor_type"]
+        )
     # ── MULTI-HOST EXTRACTION ────────────────────────────────────────────────
     raw_targets: List[str] = []
 
@@ -729,19 +729,37 @@ async def _handle_directory_lookup(
     )
 
 
-async def _finalize_checkin_and_respond(
-    state: Dict[str, Any], query: str, client_id: str
-) -> str:
-    logger.info(
-        f"[finalize] visitor={state.get('visitor_name')} "
-        f"host={state.get('meeting_with_resolved')} "
-        f"type={state.get('visitor_type')}"
-    )
-
-
 async def _finalize_checkin_and_respond(state, query, client_id):
     if not state.get("visitor_name"):
         return await _llm_reply("Ask for their name politely.", state, query, client_id)
+    if state.get("is_employee"):
+        _EMPLOYEE_ACTION_PHRASES = [
+            "notify",
+            "tell",
+            "inform",
+            "let them know",
+            "let him know",
+            "let her know",
+            "please notify",
+            "report",
+            "issue",
+            "problem",
+            "temperature",
+            "ac",
+            "fix",
+            "broken",
+            "maintenance",
+        ]
+        is_action_request = any(w in query.lower() for w in _EMPLOYEE_ACTION_PHRASES)
+        if not is_action_request:
+            _commit_checkin(state)  # log the arrival in DB without notifying anyone
+            state["conv_state"] = "COMPLETED"
+            return await _llm_reply(
+                "Identity verified. Wish the staff member a great day and let them proceed.",
+                state,
+                query,
+                client_id,
+            )
 
     if not state.get("meeting_with_resolved"):
         semantic_host = _lookup_employee(state.get("purpose", "") + " " + query)
@@ -753,9 +771,8 @@ async def _finalize_checkin_and_respond(state, query, client_id):
     if not all_hosts:
         fallback = state.get("meeting_with_resolved") or "Administration Team"
         all_hosts = [fallback]
-        state["all_hosts"] = all_hosts
+        state["all_hosts"] = all_hosts  # persist so Slack uses the right list
 
-    # AFTER
     newly_notified: List[str] = []
     db = SessionLocal()
     try:
@@ -792,11 +809,14 @@ async def _finalize_checkin_and_respond(state, query, client_id):
     state["conv_state"] = "COMPLETED"
     host_display = " and ".join(all_hosts)
     situation = f"Confirm {host_display} {'has' if len(all_hosts) == 1 else 'have'} been notified."
-    situation += (
-        " Tell them to leave the item."
-        if "Delivery" in state["visitor_type"]
-        else " Ask them to wait in the lobby."
-    )
+    if "Delivery" in state["visitor_type"]:
+        situation += " Tell them to leave the item at reception."
+    elif state.get("is_employee"):
+        situation += (
+            " Tell them the team has been notified and will attend to it shortly."
+        )
+    else:
+        situation += " Ask them to take a seat in the lobby and wait."
     return await _llm_reply(situation, state, query, client_id)
 
 
@@ -1166,10 +1186,20 @@ async def route_query(client_id: str, user_query: str) -> str:
     logger.info(f"DEBUG entities from LLM = {entities}")
 
     if any(
-        x in query_low for x in ["don't know", "do not know", "anyone", "notify admin"]
+        x in query_low
+        for x in [
+            "don't know",
+            "do not know",
+            "anyone",
+            "notify admin",
+            "admin team",
+            "administration team",
+            "notify the admin",
+        ]
     ):
         state["force_admin"] = True
         state["meeting_with_resolved"] = "Administration Team"
+        state["all_hosts"] = ["Administration Team"]
 
     is_farewell = any(w in query_low for w in ["thank you", "thanks", "bye", "goodbye"])
     if is_farewell:
@@ -1241,10 +1271,6 @@ async def route_query(client_id: str, user_query: str) -> str:
         return await _handle_scheduling(client_id, user_query, state, intent)
 
     if intent == "check_in" or state["meeting_with_resolved"]:
-        if state.get("is_employee"):
-            return await _llm_reply(
-                "Wish staff a great day.", state, user_query, client_id
-            )
         return await _finalize_checkin_and_respond(state, user_query, client_id)
 
     return await llm.get_response(
@@ -1265,7 +1291,7 @@ async def _llm_reply(
     now = datetime.now()
     hour = now.hour % 12 or 12
     now_str = f"{hour}:{now.strftime('%M %p on %A, %d %B %Y')}"
-    time_context = f"[Current time: {now_str}] "
+    time_context = f"[Current time: {now_str} — use for scheduling logic ONLY, do NOT mention to the visitor unless they ask] "
 
     info = f"TALKING TO: {visitor} | HOST: {host} | STATUS: {state['conv_state']}"
     is_first = not state.get("greeted", False)
@@ -1290,33 +1316,44 @@ async def _llm_reply(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def mark_employee_from_face_result(client_id: str, face_verified: bool) -> None:
+def mark_employee_from_face_result(
+    client_id: str,
+    face_verified: bool,
+    employee_id: Optional[int] = None,
+    employee_name: Optional[str] = None,
+) -> None:
     """
-    Called by the WebSocket layer after face verification for a name-collision case.
+    Called by the WebSocket layer after face verification.
 
-    If face_verified=True  → promote session to employee (no visitor DB record).
-    If face_verified=False → confirm as visitor, clear the pending check so the
-                             visitor flow continues normally.
+    If face_verified=True  → promote session to employee.
+    If face_verified=False → confirm as visitor.
     """
     state = get_session_state(client_id)
 
     if face_verified:
         state["is_employee"] = True
         state["visitor_type"] = "Employee"
-        state["verified_employee_id"] = state.get("pending_employee_id")
+        # Use provided ID/name if available (from direct face match),
+        # otherwise fall back to the pending name check logic.
+        if employee_id:
+            state["verified_employee_id"] = employee_id
+        else:
+            state["verified_employee_id"] = state.get("pending_employee_id")
+
+        if employee_name:
+            state["visitor_name"] = employee_name
+            state["face_verified_name"] = employee_name
+
         logger.info(
-            "[face] '%s' confirmed as employee (id=%s) via face verification.",
-            state.get("pending_employee_name"),
-            state.get("pending_employee_id"),
+            "[face] '%s' confirmed as employee via face verification.",
+            state.get("visitor_name") or state.get("pending_employee_name"),
         )
     else:
-        logger.info(
-            "[face] '%s' face did NOT match employee record — treating as visitor.",
-            state.get("pending_employee_name"),
-        )
+        logger.info("[face] Face did NOT match employee record — treating as visitor.")
 
-    # Store the name that was checked so we don't re-trigger on the next turn
-    state["face_verified_name"] = state.get("pending_employee_name")
+    # If we didn't have a direct name but had a pending name, mark it as checked
+    if not state.get("face_verified_name"):
+        state["face_verified_name"] = state.get("pending_employee_name")
 
     # Clear the pending flags regardless of outcome
     state.pop("pending_employee_face_check", None)
