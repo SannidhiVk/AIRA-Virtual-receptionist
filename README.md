@@ -3,8 +3,6 @@
 
 Automate front-desk interactions, handle visitor check-ins, and answer queries in real-time using advanced AI, speech recognition, and face verification - all optimized to run efficiently!
 
-![System Architecture](./images/architecture.svg)
-
 ## ✨ Features
 - **🎤 Real-time Voice Interaction** - Natural, dynamic voice interactions powered by state-of-the-art TTS (Kokoro) and STT (Faster Whisper).
 - **👋 Face Verification & Presence Detection** - Autonomously recognize employees and detect new visitors using vision pipelines.
